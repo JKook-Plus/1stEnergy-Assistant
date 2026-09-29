@@ -22,8 +22,20 @@ jobs:
     name: HACS
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: hacs/action@main
+      # HACS reads hacs.json and the manifest anonymously, so on a private
+      # repository it finds neither and fails. Only a public copy can pass.
+      - name: Check the repository is public
+        id: visibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "private=$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" >> "$GITHUB_OUTPUT"
+      - name: Skip on a private repository
+        if: steps.visibility.outputs.private != 'false'
+        run: echo "::notice::HACS validation skipped because this repository is private."
+      - if: steps.visibility.outputs.private == 'false'
+        uses: actions/checkout@v4
+      - if: steps.visibility.outputs.private == 'false'
+        uses: hacs/action@main
         with:
           category: integration
           # Brand images live in home-assistant/brands, which needs a separate

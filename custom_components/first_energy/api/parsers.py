@@ -52,13 +52,32 @@ def _float(value: Any) -> float | None:
         return None
 
 
-def _data(payload: Any, *, what: str) -> dict:
+def _data(payload: Any, *, what: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ParseError(f"{what}: expected an object, got {type(payload).__name__}")
     data = payload.get("data")
     if not isinstance(data, dict):
         raise ParseError(f"{what}: payload has no 'data' object")
     return data
+
+
+def _object(value: Any) -> dict[str, Any]:
+    """An optional nested object; anything else counts as absent."""
+    return value if isinstance(value, dict) else {}
+
+
+def _records(value: Any, *, what: str) -> list[dict[str, Any]]:
+    """A list of objects, or ParseError.
+
+    Callers catch FirstEnergyError. A malformed record would otherwise
+    surface as a KeyError or AttributeError from deep inside a parser.
+    """
+    if not isinstance(value, list):
+        raise ParseError(f"{what}: expected a list, got {type(value).__name__}")
+    for item in value:
+        if not isinstance(item, dict):
+            raise ParseError(f"{what}: expected objects, got {type(item).__name__}")
+    return value
 
 
 # ---------------------------------------------------------------- accounts
@@ -71,21 +90,23 @@ def parse_accounts(payload: Any) -> tuple[Account, ...]:
     dropped, so the caller can tell "no gas connection" from "request failed".
     """
     data = _data(payload, what="accounts")
-    accounts = data.get("accounts")
-    if not isinstance(accounts, list):
+    if not isinstance(data.get("accounts"), list):
         raise ParseError("accounts: 'data.accounts' is not a list")
+    accounts = _records(data["accounts"], what="accounts")
 
     out = []
     for raw in accounts:
+        if raw.get("accountId") is None:
+            raise ParseError("accounts: an account has no 'accountId'")
         plans = raw.get("plans") or []
         plan_name = None
-        if plans and isinstance(plans[0], dict):
+        if isinstance(plans, list) and plans and isinstance(plans[0], dict):
             plan_name = plans[0].get("nickname") or (
-                plans[0].get("planOverview") or {}).get("displayName")
+                _object(plans[0].get("planOverview")).get("displayName"))
 
         sp_ids = tuple(
             str(sp["servicePointId"])
-            for sp in (raw.get("servicePoints") or [])
+            for sp in _records(raw.get("servicePoints") or [], what="accounts: servicePoints")
             if isinstance(sp, dict) and sp.get("servicePointId") is not None
         )
 
@@ -112,14 +133,14 @@ def parse_balance(payload: Any) -> Decimal:
 def parse_invoices(payload: Any) -> tuple[Invoice, ...]:
     """`GET /v1/accounts/{id}/invoices`, newest first."""
     data = _data(payload, what="invoices")
-    invoices = data.get("invoices")
-    if not isinstance(invoices, list):
+    if not isinstance(data.get("invoices"), list):
         raise ParseError("invoices: 'data.invoices' is not a list")
+    invoices = _records(data["invoices"], what="invoices")
 
     out = []
     for raw in invoices:
-        period = raw.get("period") or {}
-        discount = (raw.get("payOnTimeDiscount") or {}).get("discountAmount")
+        period = _object(raw.get("period"))
+        discount = _object(raw.get("payOnTimeDiscount")).get("discountAmount")
         out.append(Invoice(
             invoice_number=str(raw.get("invoiceNumber", "")),
             issue_date=_date(raw.get("issueDate")),
@@ -142,8 +163,8 @@ def parse_service_point(payload: Any) -> ServicePoint:
     data = _data(payload, what="service point")
 
     meters = []
-    for raw_meter in data.get("meters") or []:
-        specs = raw_meter.get("specifications") or {}
+    for raw_meter in _records(data.get("meters") or [], what="service point: meters"):
+        specs = _object(raw_meter.get("specifications"))
         registers = tuple(
             Register(
                 register_id=str(r.get("registerId", "")),
@@ -154,7 +175,7 @@ def parse_service_point(payload: Any) -> ServicePoint:
                 time_of_day=r.get("timeOfDay"),
                 multiplier=_float(r.get("multiplier")),
             )
-            for r in (raw_meter.get("registers") or [])
+            for r in _records(raw_meter.get("registers") or [], what="service point: registers")
         )
         meters.append(Meter(
             meter_id=str(raw_meter.get("meterId", "")),
@@ -191,13 +212,13 @@ def parse_usage(payload: Any) -> tuple[UsageDay, ...]:
     those days would punch a hole in the Energy dashboard twice a year.
     """
     data = _data(payload, what="usage")
-    reads = data.get("reads")
-    if not isinstance(reads, list):
+    if not isinstance(data.get("reads"), list):
         raise ParseError("usage: 'data.reads' is not a list")
+    reads = _records(data["reads"], what="usage")
 
     out = []
     for raw in reads:
-        interval = raw.get("intervalRead") or {}
+        interval = _object(raw.get("intervalRead"))
         energy = tuple(_float(v) or 0.0 for v in (interval.get("intervalReads") or []))
         cost = tuple(_float(v) or 0.0 for v in (interval.get("intervalCostings") or []))
         tou = tuple(str(v) for v in (interval.get("intervalTOU") or []))

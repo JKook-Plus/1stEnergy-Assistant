@@ -8,6 +8,7 @@ fake.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from itertools import pairwise
 
 import aiohttp
 import pytest
@@ -18,7 +19,6 @@ from custom_components.first_energy.api.auth import decode_jwt_expiry
 from custom_components.first_energy.api.client import FirstEnergyClient
 from custom_components.first_energy.api.exceptions import ApiError, AuthenticationError
 
-UTC = UTC
 EMPTY_USAGE = {"data": {"reads": []}, "meta": {"totalRecords": 0}}
 
 
@@ -198,44 +198,50 @@ class TestUsageWindows:
         api.queue("usage", payload=load("usage_recent_7d"))
         assert await client.async_get_usage("663701", date(2026, 8, 13), date(2026, 8, 6))
 
-    async def test_range_is_chunked_and_stops_at_the_start_of_history(self, api, client):
-        """The first empty chunk marks where the customer's account begins.
+    async def collect(self, client, oldest, newest, **kwargs):
+        return [
+            (start, end, days)
+            async for start, end, days in client.async_iter_usage_range(
+                "663701", oldest, newest, chunk_days=30, **kwargs
+            )
+        ]
 
-        Continuing past it would spend requests proving there is nothing there.
-        """
-        api.stub_auth()
-        api.queue("usage", payload=load("usage_30d"))
-        api.queue("usage", payload=EMPTY_USAGE)
-        api.queue("usage", payload=load("usage_30d"), always=True)  # must not be reached
-
-        days = await client.async_get_usage_range(
-            "663701", date(2020, 1, 1), date(2026, 8, 13), chunk_days=30
-        )
-        assert api.count("usage") == 2
-        assert days
-        assert days[0].read_date < days[-1].read_date
-
-    async def test_range_requests_newest_data_first(self, api, client):
-        """So a long backfill is useful from its very first chunk."""
-        api.stub_auth()
-        api.queue("usage", payload=load("usage_30d"))
-        api.queue("usage", payload=EMPTY_USAGE)
-        await client.async_get_usage_range(
-            "663701", date(2026, 1, 1), date(2026, 8, 13), chunk_days=30
-        )
-        assert api.for_endpoint("/usage")[0].query["newest-date"] == "2026-08-13"
-
-    async def test_range_covers_the_whole_span_without_gaps(self, api, client):
+    async def test_range_walks_oldest_first(self, api, client):
+        """So each chunk continues the running total of the one before it."""
         api.stub_auth()
         api.queue("usage", payload=load("usage_30d"), always=True)
-        await client.async_get_usage_range(
-            "663701", date(2026, 6, 15), date(2026, 8, 13), chunk_days=30
-        )
-        windows = [
-            (r.query["oldest-date"], r.query["newest-date"])
-            for r in api.for_endpoint("/usage")
-        ]
-        assert windows[0][1] == "2026-08-13"
-        assert windows[-1][0] == "2026-06-15"
-        for (older_start, _), (_, newer_end) in zip(windows[1:], windows[:-1], strict=True):
-            assert date.fromisoformat(newer_end) - date.fromisoformat(older_start) > timedelta(0)
+        windows = await self.collect(client, date(2026, 6, 15), date(2026, 8, 13))
+        starts = [start for start, _, _ in windows]
+        assert starts == sorted(starts)
+        assert api.for_endpoint("/usage")[0].query["oldest-date"] == "2026-06-15"
+
+    async def test_range_covers_the_whole_span_without_gaps_or_overlap(self, api, client):
+        api.stub_auth()
+        api.queue("usage", payload=load("usage_30d"), always=True)
+        windows = await self.collect(client, date(2026, 6, 15), date(2026, 8, 13))
+        assert windows[0][0] == date(2026, 6, 15)
+        assert windows[-1][1] == date(2026, 8, 13)
+        for (_, end, _), (next_start, _, _) in pairwise(windows):
+            assert next_start - end == timedelta(days=1)
+
+    async def test_empty_windows_are_yielded_not_treated_as_the_end(self, api, client):
+        """Walking forward, an empty window only means history hasn't started yet."""
+        api.stub_auth()
+        api.queue("usage", payload=EMPTY_USAGE)
+        api.queue("usage", payload=load("usage_30d"), always=True)
+        windows = await self.collect(client, date(2026, 5, 1), date(2026, 8, 13))
+        assert len(windows) == api.count("usage") == 4
+        assert windows[0][2] == ()
+        assert windows[-1][2]
+
+    async def test_a_failing_window_stops_the_walk(self, api, client):
+        api.stub_auth()
+        api.queue("usage", payload=load("usage_30d"))
+        api.queue("usage", status=503, body="upstream unavailable", always=True)
+        seen = []
+        with pytest.raises(ApiError):
+            async for start, _, _ in client.async_iter_usage_range(
+                "663701", date(2026, 6, 1), date(2026, 8, 13), chunk_days=30
+            ):
+                seen.append(start)
+        assert seen == [date(2026, 6, 1)]

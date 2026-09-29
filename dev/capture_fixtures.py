@@ -75,6 +75,30 @@ PII_KEYS = {
     "access_token", "refresh_token", "token", "bfftoken", "authorization",
 }
 
+# Any key containing one of these is treated as PII too, so variants the
+# exact list misses (customerName, billingEmail, postalAddress, ...) are still
+# caught. Over-redacting a harmless field only costs a less useful fixture;
+# missing a real one leaks it.
+PII_KEY_PARTS = ("name", "email", "address", "phone", "mobile", "birth")
+
+# Keys that contain one of those parts but aren't about a person. The parsers
+# need these to stay readable.
+NOT_PII_KEYS = {"nickname", "planname", "brandname", "retailername"}
+
+
+def is_pii_key(key: str) -> bool:
+    """`key` normalised: lower case, no underscores or hyphens."""
+    if key in NOT_PII_KEYS:
+        return False
+    return key in PII_KEYS or any(part in key for part in PII_KEY_PARTS)
+
+
+# A JWT anywhere in a string, including inside a longer value such as an
+# "Authorization: Bearer ..." header or a URL. Every JWT header is a JSON
+# object, so base64url-encoded it always starts "eyJ".
+JWT_PATTERN = re.compile(r"eyJ[\w-]+\.[\w-]+\.[\w-]*")
+
+
 # Keys whose values are *pseudonymised consistently* — they're structural, so
 # tests need them to stay internally consistent, but they identify the account.
 ID_KEYS = {
@@ -141,7 +165,7 @@ class Sanitiser:
             return
         if k in ID_KEYS:
             self._fake(k, str(node))
-        elif k in PII_KEYS and isinstance(node, str):
+        elif is_pii_key(k) and isinstance(node, str):
             # Register long PII values so they're also scrubbed where they
             # appear inside free text elsewhere in the payload.
             if len(node) >= MIN_SUBSTRING_LEN:
@@ -157,12 +181,17 @@ class Sanitiser:
     # -- pass 2 ---------------------------------------------------------
     def _apply(self, node, key: str | None = None):
         k = (key or "").lower().replace("_", "").replace("-", "")
+        if is_pii_key(k) and isinstance(node, (dict, list)):
+            # A structured address or contact block: its inner keys (line1,
+            # value, ...) say nothing about what they hold, so drop it whole.
+            self.hits += 1
+            return f"<redacted:{k}>"
         if isinstance(node, dict):
             return {kk: self._apply(vv, kk) for kk, vv in node.items()}
         if isinstance(node, list):
             return [self._apply(v, key) for v in node]
 
-        if k in PII_KEYS and node is not None:
+        if is_pii_key(k) and node is not None:
             self.hits += 1
             return None if node == "" else f"<redacted:{k}>"
 
@@ -172,10 +201,12 @@ class Sanitiser:
             return int(fake) if isinstance(node, int) and fake.isdigit() else fake
 
         if isinstance(node, str):
-            # JWTs and anything shaped like one.
+            # JWTs and anything shaped like one, whole or embedded.
             if re.fullmatch(r"[\w-]+\.[\w-]+\.[\w-]+", node) and len(node) > 100:
                 self.hits += 1
                 return "<redacted:jwt>"
+            node, embedded = JWT_PATTERN.subn("<redacted:jwt>", node)
+            self.hits += embedded
             return self._scrub_strings(node)
         return node
 

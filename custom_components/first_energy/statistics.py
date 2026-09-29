@@ -16,18 +16,19 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
-from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
 from homeassistant.components.recorder.models.statistics import StatisticMeanType
 from homeassistant.components.recorder.statistics import (
+    StatisticsRow,
     async_add_external_statistics,
     get_last_statistics,
     statistics_during_period,
 )
-from homeassistant.const import CURRENCY_DOLLAR, UnitOfEnergy
+from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.recorder import get_instance
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, STAT_COST, STAT_ENERGY, statistic_id
@@ -36,52 +37,104 @@ from .services.statistics import HourlyBucket
 _LOGGER = logging.getLogger(__name__)
 
 
-async def _async_baseline_sum(
-    hass: HomeAssistant, stat_id: str, first_hour: datetime
-) -> float:
-    """The cumulative total to resume from when writing at `first_hour`.
+# How far back to look for the row before an import. Covers any ordinary gap
+# (a missed poll, an HA outage); a longer one falls back to a full search.
+BASELINE_LOOKBACK = timedelta(days=30)
 
-    Seeding correctly is not optional, and there are two distinct cases.
+# Earlier than any meter data; statistics_during_period needs a start.
+_BEGINNING = datetime(2000, 1, 1, tzinfo=UTC)
 
-    When the new data starts *after* everything stored, the last recorded `sum`
-    is the baseline — the ordinary append. Starting from zero instead would make
-    the series collapse and climb again, which the Energy dashboard renders as
-    negative consumption.
 
-    When the new data *overlaps* what is stored — which happens on every single
-    poll, because the coordinator deliberately re-requests a rolling window —
-    the last stored `sum` already contains the hours about to be rewritten.
-    Resuming from it would count them twice, inflating every subsequent hour and
-    silently overstating consumption for as long as the integration runs. The
-    baseline in that case is the total as at the hour immediately *before* the
-    first one being written.
-
-    Recorder access is synchronous and must not touch the event loop, hence the
-    executor hops.
-    """
-    recorder = get_instance(hass)
-    last = await recorder.async_add_executor_job(
-        get_last_statistics, hass, 1, stat_id, True, {"start", "sum"}
-    )
-    if not last or stat_id not in last or not last[stat_id]:
-        return 0.0
-
-    row = last[stat_id][0]
-    last_start = dt_util.utc_from_timestamp(row["start"])
-    if first_hour > last_start:
-        return float(row.get("sum") or 0.0)
-
-    previous_hour = first_hour - timedelta(hours=1)
-    rows = await recorder.async_add_executor_job(
+async def _async_rows(
+    hass: HomeAssistant, stat_id: str, start: datetime, end: datetime | None
+) -> list[StatisticsRow]:
+    """Stored hourly rows with `start <= row start < end`, oldest first."""
+    rows = await get_instance(hass).async_add_executor_job(
         statistics_during_period,
-        hass, previous_hour, first_hour, {stat_id}, "hour", None, {"sum"},
+        hass, start, end, {stat_id}, "hour", None, {"state", "sum"},
     )
-    series = rows.get(stat_id) or []
-    if not series:
-        # Rewriting from the very beginning of the series, or across a gap with
-        # nothing before it. Either way there is no earlier total to carry.
+    return rows.get(stat_id) or []
+
+
+async def _async_last_row(hass: HomeAssistant, stat_id: str) -> StatisticsRow | None:
+    last = await get_instance(hass).async_add_executor_job(
+        get_last_statistics, hass, 1, stat_id, True, {"state", "sum"}
+    )
+    rows = (last or {}).get(stat_id) or []
+    return rows[0] if rows else None
+
+
+async def _async_sum_before(hass: HomeAssistant, stat_id: str, hour: datetime) -> float:
+    """The running total as at the last stored row before `hour`.
+
+    This is the baseline an import starting at `hour` continues from. It is
+    the last row *strictly before* `hour`, however far back: taking only the
+    hour immediately before would reset the total to zero after any gap,
+    which the Energy dashboard shows as negative consumption.
+
+    Zero only when nothing at all is stored before `hour`, which is the
+    true start of the series.
+    """
+    last = await _async_last_row(hass, stat_id)
+    if last is None:
         return 0.0
-    return float(series[-1].get("sum") or 0.0)
+    if dt_util.utc_from_timestamp(last["start"]) < hour:
+        return float(last.get("sum") or 0.0)
+
+    rows = await _async_rows(hass, stat_id, hour - BASELINE_LOOKBACK, hour)
+    if not rows:
+        rows = await _async_rows(hass, stat_id, _BEGINNING, hour)
+    return float(rows[-1].get("sum") or 0.0) if rows else 0.0
+
+
+async def _async_write_series(
+    hass: HomeAssistant,
+    metadata: StatisticMetaData,
+    points: Sequence[tuple[datetime, float]],
+) -> None:
+    """Write one statistic's hourly values and keep every later row consistent.
+
+    `points` are (hour, value) pairs, oldest first. The running sum starts
+    from whatever is stored before the first hour. Any rows stored *after*
+    the last hour were summed from the old values of the hours being
+    rewritten, so they are shifted by the difference; without that, filling
+    a gap or correcting a day would leave the series dropping where the
+    import ends.
+    """
+    if not points:
+        return
+    stat_id = metadata["statistic_id"]
+    first_hour, last_hour = points[0][0], points[-1][0]
+
+    running = await _async_sum_before(hass, stat_id, first_hour)
+    old_end = await _async_sum_before(hass, stat_id, last_hour + timedelta(hours=1))
+
+    rows: list[StatisticData] = []
+    for hour, value in points:
+        running += value
+        rows.append(StatisticData(start=hour, state=value, sum=running))
+
+    later: list[StatisticsRow] = []
+    last = await _async_last_row(hass, stat_id)
+    if last is not None and dt_util.utc_from_timestamp(last["start"]) > last_hour:
+        later = await _async_rows(hass, stat_id, last_hour + timedelta(hours=1), None)
+
+    delta = running - old_end
+    if later and abs(delta) > 1e-9:
+        _LOGGER.debug(
+            "Shifting %d later %s rows by %.6f after rewriting %s .. %s",
+            len(later), stat_id, delta, first_hour.isoformat(), last_hour.isoformat(),
+        )
+        for row in later:
+            shifted = StatisticData(
+                start=dt_util.utc_from_timestamp(row["start"]),
+                sum=float(row.get("sum") or 0.0) + delta,
+            )
+            if (state := row.get("state")) is not None:
+                shifted["state"] = state
+            rows.append(shifted)
+
+    async_add_external_statistics(hass, metadata, rows)
 
 
 def _metadata(
@@ -111,58 +164,34 @@ async def async_import_buckets(
     Re-importing an hour already stored is safe and intentional — the recorder
     replaces rows matching a statistic id and start time. That is what lets the
     coordinator re-request a rolling window every poll and quietly repair gaps
-    left by a failed run, without any explicit reconciliation logic.
+    left by a failed run, without any explicit reconciliation logic. Imports
+    can arrive in any order: each continues from the stored row before it and
+    carries later rows along.
+
+    Waits for the recorder to commit before returning, so the next import's
+    baseline reads what this one wrote.
     """
     if not buckets:
         return 0
 
-    energy_id = statistic_id(nmi, STAT_ENERGY)
-    cost_id = statistic_id(nmi, STAT_COST)
-
-    first_hour = buckets[0].start
-    energy_sum = await _async_baseline_sum(hass, energy_id, first_hour)
-    cost_sum = await _async_baseline_sum(hass, cost_id, first_hour)
-
-    energy_rows: list[StatisticData] = []
-    cost_rows: list[StatisticData] = []
-    for bucket in buckets:
-        energy_sum += bucket.energy_kwh
-        cost_sum += bucket.cost_aud
-        energy_rows.append(
-            StatisticData(start=bucket.start, state=bucket.energy_kwh, sum=energy_sum)
-        )
-        cost_rows.append(
-            StatisticData(start=bucket.start, state=bucket.cost_aud, sum=cost_sum)
-        )
-
-    async_add_external_statistics(
+    await _async_write_series(
         hass,
-        _metadata(energy_id, f"{display_name} energy",
+        _metadata(statistic_id(nmi, STAT_ENERGY), f"{display_name} energy",
                   UnitOfEnergy.KILO_WATT_HOUR, "energy"),
-        energy_rows,
+        [(b.start, b.energy_kwh) for b in buckets],
     )
-    async_add_external_statistics(
+    # No unit, as core's opower does: the Energy dashboard shows costs in
+    # the user's configured currency and ignores a statistic's own unit.
+    # Hours without a cost are left out rather than written as free.
+    await _async_write_series(
         hass,
-        _metadata(cost_id, f"{display_name} cost", CURRENCY_DOLLAR, None),
-        cost_rows,
+        _metadata(statistic_id(nmi, STAT_COST), f"{display_name} cost", None, None),
+        [(b.start, b.cost_aud) for b in buckets if b.cost_aud is not None],
     )
+    await get_instance(hass).async_block_till_done()
 
     _LOGGER.debug(
         "Imported %d hourly buckets for %s (%s .. %s)",
         len(buckets), nmi, buckets[0].start.isoformat(), buckets[-1].start.isoformat(),
     )
     return len(buckets)
-
-
-async def async_last_statistic_hour(hass: HomeAssistant, nmi: str):
-    """Timestamp of the newest stored hour, or None if nothing is stored yet.
-
-    Used to decide between a first-run backfill and a routine rolling update.
-    """
-    rows = await get_instance(hass).async_add_executor_job(
-        get_last_statistics, hass, 1, statistic_id(nmi, STAT_ENERGY), True, {"start"}
-    )
-    stat_id = statistic_id(nmi, STAT_ENERGY)
-    if not rows or stat_id not in rows or not rows[stat_id]:
-        return None
-    return dt_util.utc_from_timestamp(rows[stat_id][0]["start"])

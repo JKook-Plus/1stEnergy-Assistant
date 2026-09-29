@@ -26,6 +26,10 @@ class FirstEnergyConfigFlow(ConfigFlow, domain=DOMAIN):
     """Collect credentials, then one entry per electricity account."""
 
     VERSION = 1
+    # 2: re-run the history backfill once, to rewrite series that summed a
+    # removed register or wrote two rows per hour for a two-register meter.
+    # 3: the balance sensor's unit went from "$" to "AUD".
+    MINOR_VERSION = 3
 
     def __init__(self) -> None:
         self._username: str | None = None

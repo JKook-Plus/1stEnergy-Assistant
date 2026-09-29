@@ -22,13 +22,11 @@ the slots stay pinned to the right instants.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, tzinfo
 
 from ..domain import UsageDay
-
-UTC = UTC
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +36,9 @@ class HourlyBucket:
     start: datetime
     register_id: str
     energy_kwh: float = 0.0
-    cost_aud: float = 0.0
+    # None when the reads carried no cost for this hour, which is not the
+    # same as it costing nothing.
+    cost_aud: float | None = 0.0
     energy_by_tou: dict[str, float] = field(default_factory=dict)
 
     @property
@@ -60,13 +60,15 @@ def bucket_hourly(
     local_tz: tzinfo,
     *,
     register_id: str | None = None,
+    registers: Collection[str] | None = None,
 ) -> BucketResult:
     """Collapse daily interval reads into hourly buckets, oldest first.
 
     `local_tz` is the service point's jurisdiction timezone, used only to
-    resolve each `read_date` to an instant. Pass the register to isolate a
-    single series; otherwise every register in `days` is bucketed together,
-    which is only correct when there is exactly one.
+    resolve each `read_date` to an instant. Buckets are per register: a
+    meter with two registers yields two buckets for each hour. Pass
+    `register_id` to keep a single register, or `registers` to keep only
+    those (the active ones), and `combine_registers` to sum what remains.
 
     Days without populated intervals are skipped — a request made without
     `interval-reads` still returns 288 zero slots and a `readIntervalLength`
@@ -79,6 +81,8 @@ def bucket_hourly(
 
     for day in days:
         if register_id is not None and day.register_id != register_id:
+            continue
+        if registers is not None and day.register_id not in registers:
             continue
         if not day.has_intervals:
             continue
@@ -111,7 +115,7 @@ def bucket_hourly(
             start=hour,
             register_id=reg,
             energy_kwh=round(energy[(hour, reg)], 6),
-            cost_aud=round(cost.get((hour, reg), 0.0), 6),
+            cost_aud=round(cost[(hour, reg)], 6) if (hour, reg) in cost else None,
             energy_by_tou={k: round(v, 6) for k, v in
                            sorted(tou_split.get((hour, reg), {}).items())},
         )
@@ -120,30 +124,39 @@ def bucket_hourly(
     return BucketResult(buckets=buckets, warnings=tuple(warnings))
 
 
-def cumulative(
-    buckets: Sequence[HourlyBucket],
-    *,
-    energy_offset: float = 0.0,
-    cost_offset: float = 0.0,
-) -> list[dict]:
-    """Attach running totals, ready to hand to Home Assistant.
+def _sum_known(values: Iterable[float | None]) -> float | None:
+    """Total of the values that are known; None if none of them are."""
+    known = [v for v in values if v is not None]
+    return round(sum(known), 6) if known else None
 
-    The offsets must be the last `sum` already stored for these statistic IDs,
-    read back from the recorder. Seeding them at zero on every poll makes the
-    Energy dashboard sawtooth — each import would restart the cumulative series
-    from nothing and the dashboard renders the drop as negative consumption.
+
+def combine_registers(buckets: Iterable[HourlyBucket]) -> tuple[HourlyBucket, ...]:
+    """Sum every register's bucket for the same hour into one, oldest first.
+
+    A statistic holds one row per hour, so a meter with a controlled-load
+    register beside its general one must be written as their total. Writing
+    both under one statistic ID would keep only the last one's `state` while
+    the running `sum` counted both.
     """
-    rows: list[dict] = []
-    running_energy = energy_offset
-    running_cost = cost_offset
+    by_hour: dict[datetime, list[HourlyBucket]] = {}
     for bucket in buckets:
-        running_energy += bucket.energy_kwh
-        running_cost += bucket.cost_aud
-        rows.append({
-            "start": bucket.start,
-            "state": round(bucket.energy_kwh, 4),
-            "sum": round(running_energy, 4),
-            "cost_state": round(bucket.cost_aud, 4),
-            "cost_sum": round(running_cost, 4),
-        })
-    return rows
+        by_hour.setdefault(bucket.start, []).append(bucket)
+
+    combined = []
+    for hour in sorted(by_hour):
+        parts = by_hour[hour]
+        if len(parts) == 1:
+            combined.append(parts[0])
+            continue
+        tou: dict[str, float] = {}
+        for part in parts:
+            for band, kwh in part.energy_by_tou.items():
+                tou[band] = tou.get(band, 0.0) + kwh
+        combined.append(HourlyBucket(
+            start=hour,
+            register_id="+".join(sorted(p.register_id for p in parts)),
+            energy_kwh=round(sum(p.energy_kwh for p in parts), 6),
+            cost_aud=_sum_known(p.cost_aud for p in parts),
+            energy_by_tou={k: round(v, 6) for k, v in sorted(tou.items())},
+        ))
+    return tuple(combined)

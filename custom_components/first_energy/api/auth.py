@@ -23,6 +23,7 @@ only route back is a fresh login.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import json
@@ -36,7 +37,6 @@ from .exceptions import ApiError, AuthenticationError
 
 _LOGGER = logging.getLogger(__name__)
 
-UTC = UTC
 
 # Refresh this far before nominal expiry. Covers clock skew between us and
 # Azure, plus the flight time of the request the token is about to be used on.
@@ -79,9 +79,9 @@ class Token:
 class Authenticator:
     """Acquires and caches both tokens.
 
-    Not internally locked: Home Assistant drives this from a single
-    coordinator on the event loop, so concurrent refreshes do not arise. If a
-    second caller is ever added, guard `async_headers` with an asyncio.Lock.
+    Locked: the rolling poll and the background backfill both make requests,
+    and without the lock two expired tokens would be refreshed twice, sending
+    the password twice.
     """
 
     def __init__(
@@ -102,10 +102,7 @@ class Authenticator:
         self._ua = user_agent
         self._bff: Token | None = None
         self._access: Token | None = None
-
-    @property
-    def access_token_expiry(self) -> datetime | None:
-        return self._access.expires_at if self._access else None
+        self._lock = asyncio.Lock()
 
     def invalidate(self, *, access_token_too: bool = False) -> None:
         """Drop cached tokens so the next request re-acquires them."""
@@ -115,8 +112,9 @@ class Authenticator:
 
     async def async_headers(self) -> dict[str, str]:
         """Both credential headers, refreshing whichever has gone stale."""
-        bff = await self._async_bff_token()
-        access = await self._async_access_token(bff)
+        async with self._lock:
+            bff = await self._async_bff_token()
+            access = await self._async_access_token(bff)
         return {
             "authorization": f"Bearer {bff}",
             "adaptor-authorization": access,
@@ -124,9 +122,10 @@ class Authenticator:
 
     async def async_validate_credentials(self) -> None:
         """Prove the username and password work. Used by the config flow."""
-        self.invalidate(access_token_too=True)
-        bff = await self._async_bff_token()
-        await self._async_access_token(bff)
+        async with self._lock:
+            self.invalidate(access_token_too=True)
+            bff = await self._async_bff_token()
+            await self._async_access_token(bff)
 
     async def _async_bff_token(self) -> str:
         if self._bff and self._bff.is_fresh:
@@ -189,8 +188,10 @@ class Authenticator:
 
         try:
             token = json.loads(body)["access_token"]
-        except (ValueError, KeyError) as err:
+        except (ValueError, KeyError, TypeError) as err:
             raise ApiError(200, f"login response had no access_token: {body[:200]}") from err
+        if not isinstance(token, str) or not token:
+            raise ApiError(200, "login response's access_token was not a string")
 
         expiry = decode_jwt_expiry(token) or datetime.now(UTC) + FALLBACK_ACCESS_LIFETIME
         self._access = Token(token, expiry)

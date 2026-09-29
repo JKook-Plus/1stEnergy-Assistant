@@ -7,9 +7,16 @@ from typing import Final
 
 DOMAIN: Final = "first_energy"
 
+# 1st Energy bills in Australian dollars only. Not hass.config.currency: a
+# Home Assistant set to another currency would label these amounts wrongly.
+CURRENCY: Final = "AUD"
+
 CONF_ACCOUNT_ID: Final = "account_id"
 CONF_ACCOUNT_NUMBER: Final = "account_number"
 CONF_BACKFILL_DONE: Final = "backfill_complete"
+# First day the backfill has not yet imported, as an ISO date. Written after
+# every chunk, so a restart resumes rather than starting over.
+CONF_BACKFILL_CURSOR: Final = "backfill_next_day"
 
 # Meter data lags roughly a day, so there is nothing to gain from frequent
 # polling. Six hours is a compromise: a once-daily poll could add almost another
@@ -17,21 +24,27 @@ CONF_BACKFILL_DONE: Final = "backfill_complete"
 # while four requests a day stays gentle on an undocumented endpoint.
 UPDATE_INTERVAL: Final = timedelta(hours=6)
 
-# Days re-requested on every poll. Statistics writes are idempotent on
-# timestamp, so overlapping repeatedly is free and repairs any gap left by a
-# failed poll or an HA outage without special-case recovery code.
-ROLLING_WINDOW_DAYS: Final = 5
+# Days re-requested on every poll, ending yesterday, inclusive. Statistics
+# writes are idempotent on timestamp, so overlapping repeatedly is free and
+# repairs any gap left by a failed poll or an HA outage without special-case
+# recovery code.
+ROLLING_WINDOW_DAYS: Final = 6
 
-# How far back a first-time backfill will walk before giving up. Available
-# history is bounded by when the customer joined; the client stops at the first
-# empty window anyway, so this is only a backstop against an endless walk.
+# How far back a first-time backfill reaches. It starts at the account's
+# creation date when that is known, so this only caps long-standing accounts
+# and bounds the walk when the date is missing.
 MAX_BACKFILL_DAYS: Final = 365 * 5
+
+# After a failed backfill, skip it for 2^(failures - 1) polls, at most this
+# many (a day, at six-hourly polling), and raise a repair issue once it has
+# failed this many times in a row.
+BACKFILL_MAX_SKIPPED_POLLS: Final = 4
+BACKFILL_FAILURES_BEFORE_ISSUE: Final = 5
 
 # Statistic id suffixes. These are permanent: changing one orphans every
 # existing user's recorded history.
 STAT_ENERGY: Final = "energy"
 STAT_COST: Final = "cost"
-STAT_ENERGY_EXPORT: Final = "energy_export"
 
 
 def statistic_id(nmi: str, kind: str) -> str:

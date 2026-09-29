@@ -45,7 +45,3 @@ class ApiError(FirstEnergyError):
 
 class AuthenticationError(ApiError):
     """Credentials were rejected by the application itself."""
-
-
-class TokenExpiredError(ApiError):
-    """A token expired; re-authenticate and retry. Not a user-facing failure."""

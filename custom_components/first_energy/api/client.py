@@ -14,7 +14,9 @@ returns domain objects.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -201,7 +203,7 @@ class FirstEnergyClient:
         days = parse_usage(payload)
         return tuple(d for d in days if requested_oldest <= d.read_date <= newest)
 
-    async def async_get_usage_range(
+    async def async_iter_usage_range(
         self,
         service_point_id: str,
         oldest: date,
@@ -210,50 +212,35 @@ class FirstEnergyClient:
         with_intervals: bool = True,
         chunk_days: int = WINDOW_DAYS,
         delay: float | None = None,
-    ) -> tuple[UsageDay, ...]:
-        """A long range, fetched newest-first in chunks.
+    ) -> AsyncIterator[tuple[date, date, tuple[UsageDay, ...]]]:
+        """A long range in chunks, oldest first. Yields (start, end, days).
 
-        Newest-first matters for backfill: the recent data users actually care
-        about lands in the Energy dashboard first, so a long historical sync is
-        useful from its first chunk rather than only at the end.
-
-        Stops early on the first empty chunk. Available history is bounded by
-        when the customer joined — the reference account had 46 days — and
-        walking further back just wastes requests on an endpoint worth being
-        gentle with.
+        Oldest first because statistics carry a running total: each chunk
+        continues from the one before it, so it can be written to the
+        recorder as it arrives and a failure part-way keeps everything
+        already fetched. Every window is yielded, empty or not, so the caller
+        can record how far it got.
         """
         if newest < oldest:
             oldest, newest = newest, oldest
         pause = self._backfill_delay if delay is None else delay
 
-        collected: list[UsageDay] = []
-        window_end = newest
+        window_start = oldest
         first = True
-        while window_end >= oldest:
-            window_start = max(oldest, window_end - timedelta(days=chunk_days - 1))
+        while window_start <= newest:
+            window_end = min(newest, window_start + timedelta(days=chunk_days - 1))
             if not first and pause:
                 await asyncio.sleep(pause)
             first = False
 
-            chunk = await self.async_get_usage(
+            days = await self.async_get_usage(
                 service_point_id, window_start, window_end, with_intervals=with_intervals
             )
-            if not chunk:
-                _LOGGER.debug(
-                    "No data for %s..%s; assuming start of available history",
-                    window_start, window_end,
-                )
-                break
-            collected.extend(chunk)
-            window_end = window_start - timedelta(days=1)
-
-        collected.sort(key=lambda d: (d.read_date, d.register_id))
-        return tuple(collected)
+            yield window_start, window_end, days
+            window_start = window_end + timedelta(days=1)
 
 
 async def _decode(body: str, path: str) -> Any:
-    import json
-
     if not body:
         return None
     try:
