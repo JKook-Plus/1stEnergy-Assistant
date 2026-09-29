@@ -22,7 +22,7 @@ from custom_components.first_energy.const import STAT_COST, STAT_ENERGY, statist
 from custom_components.first_energy.services.statistics import HourlyBucket
 from custom_components.first_energy.statistics import async_import_buckets
 
-NMI = "4310274874"
+NMI = "9999990001"
 START = datetime(2026, 8, 1, 0, 0, tzinfo=UTC)
 
 
