@@ -72,6 +72,10 @@ pick `1st Energy energy …`. When asked about cost, choose **Use an entity
 tracking the total costs** and select `1st Energy cost …` — the retailer's own
 figures, including time-of-use bands, rather than an estimate.
 
+The statistic is the meter's total: a controlled-load register (such as
+off-peak hot water) is added in, and registers the meter no longer uses are
+left out.
+
 ## Polling
 
 Every six hours. The data only moves once a day, but a single daily poll could

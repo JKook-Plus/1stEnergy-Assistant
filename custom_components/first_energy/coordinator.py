@@ -23,7 +23,7 @@ from .const import (
     UPDATE_INTERVAL,
 )
 from .domain import Account, Invoice, ServicePoint
-from .services.statistics import bucket_hourly
+from .services.statistics import bucket_hourly, combine_registers
 from .statistics import async_import_buckets
 
 _LOGGER = logging.getLogger(__name__)
@@ -123,17 +123,31 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
         )
 
     async def _async_import(self, service_point: ServicePoint, days) -> int:
-        """Bucket and write, isolating each active register."""
+        """Bucket the active registers, sum them per hour, and write.
+
+        A removed register can still report reads for the period it was
+        live, and a meter can carry a controlled-load register beside the
+        general one. Only CURRENT registers count, and they are summed into
+        the meter's single series.
+        """
         if not days:
             return 0
         tz = ZoneInfo(service_point.timezone_name)
-        result = bucket_hourly(days, tz)
+        active = {r.register_id for r in service_point.active_registers}
+        if not active:
+            # Nothing to filter on, rather than a meter with no live
+            # register: dropping every read would empty the dashboard.
+            _LOGGER.warning(
+                "No CURRENT register listed for NMI %s; importing every register",
+                service_point.nmi,
+            )
+        result = bucket_hourly(days, tz, registers=active or None)
         for warning in result.warnings:
             _LOGGER.info("Interval count anomaly: %s", warning)
         return await async_import_buckets(
             self.hass,
             service_point.nmi,
-            result.buckets,
+            combine_registers(result.buckets),
             display_name=f"1st Energy {service_point.nmi}",
         )
 

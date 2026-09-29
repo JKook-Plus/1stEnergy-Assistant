@@ -22,7 +22,7 @@ the slots stay pinned to the right instants.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, tzinfo
 
@@ -60,13 +60,15 @@ def bucket_hourly(
     local_tz: tzinfo,
     *,
     register_id: str | None = None,
+    registers: Collection[str] | None = None,
 ) -> BucketResult:
     """Collapse daily interval reads into hourly buckets, oldest first.
 
     `local_tz` is the service point's jurisdiction timezone, used only to
-    resolve each `read_date` to an instant. Pass the register to isolate a
-    single series; otherwise every register in `days` is bucketed together,
-    which is only correct when there is exactly one.
+    resolve each `read_date` to an instant. Buckets are per register: a
+    meter with two registers yields two buckets for each hour. Pass
+    `register_id` to keep a single register, or `registers` to keep only
+    those (the active ones), and `combine_registers` to sum what remains.
 
     Days without populated intervals are skipped — a request made without
     `interval-reads` still returns 288 zero slots and a `readIntervalLength`
@@ -79,6 +81,8 @@ def bucket_hourly(
 
     for day in days:
         if register_id is not None and day.register_id != register_id:
+            continue
+        if registers is not None and day.register_id not in registers:
             continue
         if not day.has_intervals:
             continue
@@ -118,6 +122,38 @@ def bucket_hourly(
         for hour, reg in sorted(energy, key=lambda k: (k[0], k[1]))
     )
     return BucketResult(buckets=buckets, warnings=tuple(warnings))
+
+
+def combine_registers(buckets: Iterable[HourlyBucket]) -> tuple[HourlyBucket, ...]:
+    """Sum every register's bucket for the same hour into one, oldest first.
+
+    A statistic holds one row per hour, so a meter with a controlled-load
+    register beside its general one must be written as their total. Writing
+    both under one statistic ID would keep only the last one's `state` while
+    the running `sum` counted both.
+    """
+    by_hour: dict[datetime, list[HourlyBucket]] = {}
+    for bucket in buckets:
+        by_hour.setdefault(bucket.start, []).append(bucket)
+
+    combined = []
+    for hour in sorted(by_hour):
+        parts = by_hour[hour]
+        if len(parts) == 1:
+            combined.append(parts[0])
+            continue
+        tou: dict[str, float] = {}
+        for part in parts:
+            for band, kwh in part.energy_by_tou.items():
+                tou[band] = tou.get(band, 0.0) + kwh
+        combined.append(HourlyBucket(
+            start=hour,
+            register_id="+".join(sorted(p.register_id for p in parts)),
+            energy_kwh=round(sum(p.energy_kwh for p in parts), 6),
+            cost_aud=round(sum(p.cost_aud for p in parts), 6),
+            energy_by_tou={k: round(v, 6) for k, v in sorted(tou.items())},
+        ))
+    return tuple(combined)
 
 
 def cumulative(

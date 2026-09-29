@@ -20,7 +20,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import ApiError, AuthenticationError, FirstEnergyClient, FirstEnergyError
-from .const import CONF_ACCOUNT_ID
+from .const import CONF_ACCOUNT_ID, CONF_BACKFILL_DONE
 from .coordinator import FirstEnergyCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -57,6 +57,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirstEnergyConfigEntry) 
 
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: FirstEnergyConfigEntry) -> bool:
+    """Bring an entry's stored data up to the current version."""
+    if entry.version > 1:
+        # A newer major version this code doesn't understand.
+        return False
+
+    if entry.minor_version < 2:
+        # Versions before 1.2 bucketed every register a meter reported, live
+        # or removed, and a two-register meter wrote two rows per hour. The
+        # fixed backfill rewrites the whole series, so run it once more.
+        data = {**entry.data}
+        data.pop(CONF_BACKFILL_DONE, None)
+        hass.config_entries.async_update_entry(entry, data=data, minor_version=2)
+        _LOGGER.info("Re-importing 1st Energy history to correct earlier imports")
+
     return True
 
 
