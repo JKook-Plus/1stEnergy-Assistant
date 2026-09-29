@@ -1,0 +1,22 @@
+{
+  "data": {
+    "invoices": [
+      {
+        "invoiceNumber": "INV000007",
+        "accountId": "638594",
+        "issueDate": "2026-08-03",
+        "dueDate": "2026-08-17",
+        "period": {
+          "startDate": "2026-06-29",
+          "endDate": "2026-07-28"
+        },
+        "invoiceAmount": "138.06",
+        "gstAmount": "13.81",
+        "payOnTimeDiscount": {
+          "discountAmount": "5.52236"
+        },
+        "paymentStatus": "NOT_PAID"
+      }
+    ]
+  }
+}

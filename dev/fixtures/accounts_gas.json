@@ -1,0 +1,14 @@
+{
+  "data": {
+    "accounts": [
+      {
+        "accountId": "638594",
+        "accountNumber": "516645",
+        "creationDate": "2026-06-26",
+        "openStatus": "OPEN",
+        "plans": [],
+        "servicePoints": []
+      }
+    ]
+  }
+}

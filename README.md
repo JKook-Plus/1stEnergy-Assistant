@@ -99,9 +99,9 @@ uv run pytest
 uv run ruff check custom_components tests
 ```
 
-Tests run against real payloads captured from a live account and sanitised
-(`dev/capture_fixtures.py` regenerates them; `dev/rescrub.py` re-applies
-redaction). The Home Assistant layer is tested against a real recorder database
+Tests run against synthetic payloads in the shape the API returns
+(`dev/make_synthetic_fixtures.py` regenerates them). Sanitised captures from a
+live account (`dev/capture_fixtures.py`) can replace them for a stronger check. The Home Assistant layer is tested against a real recorder database
 via `pytest-homeassistant-custom-component`.
 
 The client under `custom_components/first_energy/api/` and the models under

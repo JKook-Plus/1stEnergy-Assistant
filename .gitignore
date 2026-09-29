@@ -65,8 +65,10 @@ htmlcov/
 har/
 captures/
 
-# Unsanitised fixture output. dev/fixtures/ IS committed (sanitised test data),
-# but anything marked raw stays local.
+# dev/fixtures/ is committed: synthetic test data from
+# dev/make_synthetic_fixtures.py. Captures from a live account
+# (dev/capture_fixtures.py) must be sanitised and reviewed before they replace
+# it, and anything marked raw stays local.
 dev/fixtures/raw/
 *.raw.json
 
