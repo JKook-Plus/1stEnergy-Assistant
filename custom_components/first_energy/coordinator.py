@@ -15,6 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -124,8 +125,12 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
             self.client.async_get_usage(service_point.service_point_id, oldest, newest)
         )
 
-        async with self._import_lock:
-            hours = await self._async_import(service_point, days)
+        if self.hass.is_running:
+            async with self._import_lock:
+                hours = await self._async_import(service_point, days)
+        else:
+            self._import_after_start(service_point, days)
+            hours = 0
 
         self._maybe_start_backfill(service_point)
 
@@ -138,25 +143,42 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
             hours_imported=hours,
         )
 
+    def _import_after_start(
+        self, service_point: ServicePoint, days: Sequence[UsageDay]
+    ) -> None:
+        """Import once Home Assistant has started, not during setup.
+
+        The recorder holds its queue until startup finishes, and an import
+        waits for the recorder to commit. Run from setup, that wait lasts
+        until Home Assistant gives up on the integration and cancels it.
+        """
+        async def _import(_hass: HomeAssistant) -> None:
+            async with self._import_lock:
+                await self._async_import(service_point, days)
+
+        self.config_entry.async_on_unload(async_at_started(self.hass, _import))
+
     async def _async_import(
         self, service_point: ServicePoint, days: Sequence[UsageDay]
     ) -> int:
-        """Bucket the active registers, sum them per hour, and write.
+        """Bucket the consumption registers, sum them per hour, and write.
 
         A removed register can still report reads for the period it was
-        live, and a meter can carry a controlled-load register beside the
-        general one. Only CURRENT registers count, and they are summed into
-        the meter's single series.
+        live, a meter can carry a controlled-load register beside the
+        general one, and a smart meter also reports reactive energy. Only
+        CURRENT import registers count, and they are summed into the
+        meter's single series.
         """
         if not days:
             return 0
         tz = ZoneInfo(service_point.timezone_name)
-        active = {r.register_id for r in service_point.active_registers}
+        active = {r.register_id for r in service_point.consumption_registers}
         if not active:
             # Nothing to filter on, rather than a meter with no live
             # register: dropping every read would empty the dashboard.
             _LOGGER.warning(
-                "No CURRENT register listed for NMI %s; importing every register",
+                "No CURRENT consumption register listed for NMI %s; "
+                "importing every register",
                 service_point.nmi,
             )
         result = bucket_hourly(days, tz, registers=active or None)

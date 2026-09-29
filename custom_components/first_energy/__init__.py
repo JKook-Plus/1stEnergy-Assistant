@@ -23,7 +23,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import ApiError, AuthenticationError, FirstEnergyClient, FirstEnergyError
-from .const import CONF_ACCOUNT_ID, CONF_BACKFILL_DONE, CURRENCY, DOMAIN
+from .const import CONF_ACCOUNT_ID, CONF_BACKFILL_CURSOR, CONF_BACKFILL_DONE, CURRENCY, DOMAIN
 from .coordinator import FirstEnergyCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -91,6 +91,16 @@ async def async_migrate_entry(hass: HomeAssistant, entry: FirstEnergyConfigEntry
                 hass, entity_id, new_unit_class=None, new_unit_of_measurement=CURRENCY
             )
         hass.config_entries.async_update_entry(entry, minor_version=3)
+
+    if entry.minor_version < 4:
+        # Versions before 1.4 sized each usage page by days, not records, so
+        # a meter with several registers lost whole days, and they added
+        # reactive-energy registers to consumption. Re-import the history.
+        data = {**entry.data}
+        data.pop(CONF_BACKFILL_DONE, None)
+        data.pop(CONF_BACKFILL_CURSOR, None)
+        hass.config_entries.async_update_entry(entry, data=data, minor_version=4)
+        _LOGGER.info("Re-importing 1st Energy history to fill missing days")
 
     return True
 
