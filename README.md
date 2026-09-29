@@ -51,7 +51,7 @@ optical reader on the meter itself.
 ### HACS
 
 1. Install [HACS](https://hacs.xyz/docs/use/download/download/) if you haven't already.
-2. [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=FoxClock&repository=1stEnergy-Assistant&category=integration)
+2. [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=JKook-Plus&repository=1stEnergy-Assistant&category=integration)
 3. Press **Download**.
 4. Restart Home Assistant.
 
@@ -59,7 +59,7 @@ That button adds this repository to HACS for you. If it doesn't work (the
 My Home Assistant links need to be [set up
 once](https://my.home-assistant.io/) per instance), do it by hand instead:
 **HACS → ⋮ → Custom repositories**, add
-`https://github.com/FoxClock/1stEnergy-Assistant` with category
+`https://github.com/JKook-Plus/1stEnergy-Assistant` with category
 **Integration**, then install **1st Energy** and restart.
 
 ### Manual
