@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Weekly, like Validate, so a broken runner image or action shows up
+    # even in weeks with no pushes. Dependencies come from uv.lock, so this
+    # tests the locked Home Assistant, not the newest release.
+    - cron: "30 4 * * 1"
   workflow_dispatch:
 
 jobs:
@@ -16,9 +21,6 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.13
 
       - name: Install dependencies
         run: uv sync --group dev

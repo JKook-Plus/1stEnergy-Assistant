@@ -1,9 +1,11 @@
 """Fixture loading for the parser and statistics tests.
 
-The JSON files under `fixtures/` are sanitised captures from a live account,
-produced by `dev/capture_fixtures.py`. Testing against real payload shapes is
-the point: a hand-written fixture only ever proves the parser agrees with
-whoever wrote the fixture.
+The JSON files under `dev/fixtures/` are synthetic, written by
+`dev/make_synthetic_fixtures.py` in the shape the parsers expect. They keep
+the suite runnable, but a hand-written fixture only ever proves the parser
+agrees with whoever wrote the fixture: sanitised captures from a live
+account (`dev/capture_fixtures.py`) are the stronger test, and can replace
+these files directly.
 """
 
 from __future__ import annotations

@@ -1,0 +1,43 @@
+{
+  "data": {
+    "servicePointId": "663701",
+    "nationalMeteringId": "9999990001",
+    "servicePointStatus": "ACTIVE",
+    "jurisdictionCode": "NSW",
+    "isGenerator": false,
+    "meters": [
+      {
+        "meterId": "M1",
+        "specifications": {
+          "status": "CURRENT"
+        },
+        "registers": [
+          {
+            "registerId": "E1",
+            "status": "CURRENT",
+            "unitOfMeasure": "KWH",
+            "controlledLoad": false,
+            "networkTariffCode": "N70",
+            "timeOfDay": "ALLDAY"
+          }
+        ]
+      },
+      {
+        "meterId": "M0",
+        "specifications": {
+          "status": "REMOVED"
+        },
+        "registers": [
+          {
+            "registerId": "E0",
+            "status": "REMOVED",
+            "unitOfMeasure": "KWH",
+            "controlledLoad": false,
+            "networkTariffCode": "N70",
+            "timeOfDay": "ALLDAY"
+          }
+        ]
+      }
+    ]
+  }
+}

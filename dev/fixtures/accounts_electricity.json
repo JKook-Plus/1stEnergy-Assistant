@@ -1,0 +1,26 @@
+{
+  "data": {
+    "accounts": [
+      {
+        "accountId": "638594",
+        "accountNumber": "516645",
+        "displayName": "<redacted:displayname>",
+        "creationDate": "2026-06-26",
+        "openStatus": "OPEN",
+        "plans": [
+          {
+            "nickname": "Residential Time of Use",
+            "planOverview": {
+              "displayName": "Residential Time of Use"
+            }
+          }
+        ],
+        "servicePoints": [
+          {
+            "servicePointId": "663701"
+          }
+        ]
+      }
+    ]
+  }
+}
