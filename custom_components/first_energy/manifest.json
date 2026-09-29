@@ -4,10 +4,10 @@
   "codeowners": ["@FoxClock"],
   "config_flow": true,
   "dependencies": ["recorder"],
-  "documentation": "https://github.com/JKook-Plus/ha-first-energy",
+  "documentation": "https://github.com/JKook-Plus/ha-1st-Energy",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/JKook-Plus/ha-first-energy/issues",
+  "issue_tracker": "https://github.com/JKook-Plus/ha-1st-Energy/issues",
   "requirements": [],
   "version": "0.1.0"
 }
