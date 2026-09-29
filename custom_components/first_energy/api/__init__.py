@@ -13,7 +13,6 @@ from .exceptions import (
     ApiError,
     AuthenticationError,
     FirstEnergyError,
-    TokenExpiredError,
 )
 from .parsers import ParseError
 
@@ -23,5 +22,4 @@ __all__ = [
     "FirstEnergyClient",
     "FirstEnergyError",
     "ParseError",
-    "TokenExpiredError",
 ]

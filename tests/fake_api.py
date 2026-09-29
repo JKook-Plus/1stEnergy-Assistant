@@ -21,8 +21,6 @@ from typing import Any
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-UTC = UTC
-
 # An application-level response carries these; an Azure Front Door refusal does
 # not. This is the only way to tell an expired token from a wrong password.
 APP_HEADERS = {"x-powered-by": "ASP.NET", "x-v": "1.7.2"}

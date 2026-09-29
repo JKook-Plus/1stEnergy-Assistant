@@ -19,7 +19,6 @@ from custom_components.first_energy.api.auth import decode_jwt_expiry
 from custom_components.first_energy.api.client import FirstEnergyClient
 from custom_components.first_energy.api.exceptions import ApiError, AuthenticationError
 
-UTC = UTC
 EMPTY_USAGE = {"data": {"reads": []}, "meta": {"totalRecords": 0}}
 
 

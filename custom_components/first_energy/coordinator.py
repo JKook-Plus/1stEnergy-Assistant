@@ -50,10 +50,6 @@ class FirstEnergyData:
         unpaid = [i for i in self.invoices if not i.is_paid and i.due_date]
         return min(unpaid, key=lambda i: i.due_date) if unpaid else None
 
-    @property
-    def latest_invoice(self) -> Invoice | None:
-        return self.invoices[0] if self.invoices else None
-
 
 class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
     """Polls a rolling window and keeps the Energy dashboard fed."""

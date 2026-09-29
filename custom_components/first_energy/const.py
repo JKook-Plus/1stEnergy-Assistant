@@ -45,7 +45,6 @@ BACKFILL_FAILURES_BEFORE_ISSUE: Final = 5
 # existing user's recorded history.
 STAT_ENERGY: Final = "energy"
 STAT_COST: Final = "cost"
-STAT_ENERGY_EXPORT: Final = "energy_export"
 
 
 def statistic_id(nmi: str, kind: str) -> str:

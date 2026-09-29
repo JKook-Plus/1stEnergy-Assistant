@@ -194,17 +194,3 @@ async def async_import_buckets(
         len(buckets), nmi, buckets[0].start.isoformat(), buckets[-1].start.isoformat(),
     )
     return len(buckets)
-
-
-async def async_last_statistic_hour(hass: HomeAssistant, nmi: str):
-    """Timestamp of the newest stored hour, or None if nothing is stored yet.
-
-    Used to decide between a first-run backfill and a routine rolling update.
-    """
-    rows = await get_instance(hass).async_add_executor_job(
-        get_last_statistics, hass, 1, statistic_id(nmi, STAT_ENERGY), True, {"start"}
-    )
-    stat_id = statistic_id(nmi, STAT_ENERGY)
-    if not rows or stat_id not in rows or not rows[stat_id]:
-        return None
-    return dt_util.utc_from_timestamp(rows[stat_id][0]["start"])

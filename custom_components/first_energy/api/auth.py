@@ -37,7 +37,6 @@ from .exceptions import ApiError, AuthenticationError
 
 _LOGGER = logging.getLogger(__name__)
 
-UTC = UTC
 
 # Refresh this far before nominal expiry. Covers clock skew between us and
 # Azure, plus the flight time of the request the token is about to be used on.
@@ -104,10 +103,6 @@ class Authenticator:
         self._bff: Token | None = None
         self._access: Token | None = None
         self._lock = asyncio.Lock()
-
-    @property
-    def access_token_expiry(self) -> datetime | None:
-        return self._access.expires_at if self._access else None
 
     def invalidate(self, *, access_token_too: bool = False) -> None:
         """Drop cached tokens so the next request re-acquires them."""

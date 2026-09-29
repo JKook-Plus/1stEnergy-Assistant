@@ -22,13 +22,11 @@ the slots stay pinned to the right instants.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, tzinfo
 
 from ..domain import UsageDay
-
-UTC = UTC
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,32 +160,3 @@ def combine_registers(buckets: Iterable[HourlyBucket]) -> tuple[HourlyBucket, ..
             energy_by_tou={k: round(v, 6) for k, v in sorted(tou.items())},
         ))
     return tuple(combined)
-
-
-def cumulative(
-    buckets: Sequence[HourlyBucket],
-    *,
-    energy_offset: float = 0.0,
-    cost_offset: float = 0.0,
-) -> list[dict]:
-    """Attach running totals, ready to hand to Home Assistant.
-
-    The offsets must be the last `sum` already stored for these statistic IDs,
-    read back from the recorder. Seeding them at zero on every poll makes the
-    Energy dashboard sawtooth — each import would restart the cumulative series
-    from nothing and the dashboard renders the drop as negative consumption.
-    """
-    rows: list[dict] = []
-    running_energy = energy_offset
-    running_cost = cost_offset
-    for bucket in buckets:
-        running_energy += bucket.energy_kwh
-        running_cost += bucket.cost_aud or 0.0
-        rows.append({
-            "start": bucket.start,
-            "state": round(bucket.energy_kwh, 4),
-            "sum": round(running_energy, 4),
-            "cost_state": round(bucket.cost_aud or 0.0, 4),
-            "cost_sum": round(running_cost, 4),
-        })
-    return rows

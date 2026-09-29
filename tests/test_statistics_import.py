@@ -20,12 +20,8 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
 
 from custom_components.first_energy.const import STAT_COST, STAT_ENERGY, statistic_id
 from custom_components.first_energy.services.statistics import HourlyBucket
-from custom_components.first_energy.statistics import (
-    async_import_buckets,
-    async_last_statistic_hour,
-)
+from custom_components.first_energy.statistics import async_import_buckets
 
-UTC = UTC
 NMI = "4310274874"
 START = datetime(2026, 8, 1, 0, 0, tzinfo=UTC)
 
@@ -106,21 +102,6 @@ class TestImport:
         self, recorder_mock, enable_custom_integrations, hass: HomeAssistant
     ):
         assert await async_import_buckets(hass, NMI, [], display_name="test") == 0
-
-
-class TestLastStatisticHour:
-    async def test_none_before_anything_is_stored(
-        self, recorder_mock, enable_custom_integrations, hass: HomeAssistant
-    ):
-        assert await async_last_statistic_hour(hass, NMI) is None
-
-    async def test_reports_the_newest_stored_hour(
-        self, recorder_mock, enable_custom_integrations, hass: HomeAssistant
-    ):
-        await async_import_buckets(hass, NMI, buckets(10), display_name="test")
-        await async_wait_recording_done(hass)
-        last = await async_last_statistic_hour(hass, NMI)
-        assert last == START + timedelta(hours=9)
 
 
 class TestReimportIsIdempotent:

@@ -9,7 +9,7 @@ those days.
 
 from __future__ import annotations
 
-from datetime import UTC, date, timedelta
+from datetime import date, timedelta
 from itertools import pairwise
 from zoneinfo import ZoneInfo
 
@@ -17,11 +17,10 @@ import pytest
 
 from custom_components.first_energy.api.parsers import parse_usage
 from custom_components.first_energy.domain import UsageDay
-from custom_components.first_energy.services.statistics import bucket_hourly, cumulative
+from custom_components.first_energy.services.statistics import bucket_hourly
 
 SYDNEY = ZoneInfo("Australia/Sydney")
 ADELAIDE = ZoneInfo("Australia/Adelaide")  # UTC+9:30 — 1st Energy sells into SA
-UTC = UTC
 
 
 def make_day(day: date, slots: int, *, kwh: float = 0.1, minutes: int = 5) -> UsageDay:
@@ -120,26 +119,3 @@ class TestHalfHourOffsetJurisdiction:
         assert all(b.start.minute == 0 for b in result.buckets)
         assert sum(b.energy_kwh for b in result.buckets) == pytest.approx(28.8)
         assert len(result.buckets) == 25  # two partial hours at the edges
-
-
-class TestCumulative:
-    def test_running_totals_accumulate(self, usage_7d_payload):
-        buckets = bucket_hourly(parse_usage(usage_7d_payload), SYDNEY).buckets
-        rows = cumulative(buckets)
-        assert rows[0]["sum"] == pytest.approx(rows[0]["state"])
-        assert rows[-1]["sum"] == pytest.approx(
-            sum(b.energy_kwh for b in buckets), abs=1e-3)
-
-    def test_offset_seeds_the_series(self, usage_7d_payload):
-        """Without this the Energy dashboard sawtooths on every poll."""
-        buckets = bucket_hourly(parse_usage(usage_7d_payload), SYDNEY).buckets
-        plain = cumulative(buckets)
-        seeded = cumulative(buckets, energy_offset=1000.0, cost_offset=50.0)
-        assert seeded[0]["sum"] == pytest.approx(plain[0]["sum"] + 1000.0)
-        assert seeded[-1]["cost_sum"] == pytest.approx(plain[-1]["cost_sum"] + 50.0)
-
-    def test_sums_never_decrease(self, usage_30d_payload):
-        """A decreasing sum is what the dashboard renders as negative usage."""
-        rows = cumulative(bucket_hourly(parse_usage(usage_30d_payload), SYDNEY).buckets)
-        sums = [r["sum"] for r in rows]
-        assert all(b >= a for a, b in pairwise(sums))
