@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -89,8 +89,17 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
     async def _async_setup(self) -> None:
         """One-off discovery, run before the first refresh."""
         if not self.account.service_point_ids:
-            raise UpdateFailed(
+            # Permanent: retrying setup would only fail the same way.
+            raise ConfigEntryError(
                 f"Account {self.account.account_number} has no electricity connection")
+        if len(self.account.service_point_ids) > 1:
+            _LOGGER.warning(
+                "Account %s has %d electricity connections; only the first (%s) is "
+                "imported",
+                self.account.account_number,
+                len(self.account.service_point_ids),
+                self.account.service_point_ids[0],
+            )
         self._service_point = await self._call(
             self.client.async_get_service_point(self.account.service_point_ids[0])
         )
@@ -112,7 +121,7 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
         # rolling window rather than a single day: re-importing hours we already
         # hold is free, and it silently repairs anything a failed poll missed.
         newest = dt_util.now().date() - timedelta(days=1)
-        oldest = newest - timedelta(days=ROLLING_WINDOW_DAYS)
+        oldest = newest - timedelta(days=ROLLING_WINDOW_DAYS - 1)
         days = await self._call(
             self.client.async_get_usage(service_point.service_point_id, oldest, newest)
         )

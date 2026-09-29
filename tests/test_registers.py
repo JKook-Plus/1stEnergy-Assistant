@@ -155,7 +155,7 @@ class TestUpgrade:
         assert await async_migrate_entry(hass, entry)
         assert CONF_BACKFILL_DONE not in entry.data
         assert entry.data[CONF_ACCOUNT_ID] == "638594"
-        assert entry.minor_version == 2
+        assert entry.minor_version == 3
 
     async def test_migrated_entries_are_left_alone(
         self, recorder_mock, enable_custom_integrations, hass: HomeAssistant

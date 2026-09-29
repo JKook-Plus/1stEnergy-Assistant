@@ -58,6 +58,8 @@ directory and restart.
 Sign in with the same email address and password you use at
 `myaccount.1stenergy.com.au`. If the login covers more than one electricity
 account you will be asked which to add; repeat the process to add the others.
+An account with more than one electricity connection imports only the first,
+and logs a warning saying so.
 
 On first run the integration imports your available history in the
 background, from the day your account was opened (up to five years back). The

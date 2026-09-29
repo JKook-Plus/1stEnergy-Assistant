@@ -26,7 +26,7 @@ from homeassistant.components.recorder.statistics import (
     get_last_statistics,
     statistics_during_period,
 )
-from homeassistant.const import CURRENCY_DOLLAR, UnitOfEnergy
+from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
@@ -179,11 +179,13 @@ async def async_import_buckets(
                   UnitOfEnergy.KILO_WATT_HOUR, "energy"),
         [(b.start, b.energy_kwh) for b in buckets],
     )
+    # No unit, as core's opower does: the Energy dashboard shows costs in
+    # the user's configured currency and ignores a statistic's own unit.
+    # Hours without a cost are left out rather than written as free.
     await _async_write_series(
         hass,
-        _metadata(statistic_id(nmi, STAT_COST), f"{display_name} cost",
-                  CURRENCY_DOLLAR, None),
-        [(b.start, b.cost_aud) for b in buckets],
+        _metadata(statistic_id(nmi, STAT_COST), f"{display_name} cost", None, None),
+        [(b.start, b.cost_aud) for b in buckets if b.cost_aud is not None],
     )
     await get_instance(hass).async_block_till_done()
 

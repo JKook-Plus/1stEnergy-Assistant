@@ -21,14 +21,13 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import CURRENCY_DOLLAR
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import FirstEnergyConfigEntry
-from .const import DOMAIN
+from .const import CURRENCY, DOMAIN
 from .coordinator import FirstEnergyCoordinator, FirstEnergyData
 
 
@@ -43,14 +42,14 @@ SENSORS: tuple[FirstEnergySensorDescription, ...] = (
         translation_key="balance",
         device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.TOTAL,
-        native_unit_of_measurement=CURRENCY_DOLLAR,
+        native_unit_of_measurement=CURRENCY,
         value=lambda data: data.balance,
     ),
     FirstEnergySensorDescription(
         key="next_invoice_amount",
         translation_key="next_invoice_amount",
         device_class=SensorDeviceClass.MONETARY,
-        native_unit_of_measurement=CURRENCY_DOLLAR,
+        native_unit_of_measurement=CURRENCY,
         value=lambda data: inv.amount if (inv := data.next_invoice) else None,
     ),
     FirstEnergySensorDescription(

@@ -23,6 +23,7 @@ only route back is a fresh login.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import json
@@ -79,9 +80,9 @@ class Token:
 class Authenticator:
     """Acquires and caches both tokens.
 
-    Not internally locked: Home Assistant drives this from a single
-    coordinator on the event loop, so concurrent refreshes do not arise. If a
-    second caller is ever added, guard `async_headers` with an asyncio.Lock.
+    Locked: the rolling poll and the background backfill both make requests,
+    and without the lock two expired tokens would be refreshed twice, sending
+    the password twice.
     """
 
     def __init__(
@@ -102,6 +103,7 @@ class Authenticator:
         self._ua = user_agent
         self._bff: Token | None = None
         self._access: Token | None = None
+        self._lock = asyncio.Lock()
 
     @property
     def access_token_expiry(self) -> datetime | None:
@@ -115,8 +117,9 @@ class Authenticator:
 
     async def async_headers(self) -> dict[str, str]:
         """Both credential headers, refreshing whichever has gone stale."""
-        bff = await self._async_bff_token()
-        access = await self._async_access_token(bff)
+        async with self._lock:
+            bff = await self._async_bff_token()
+            access = await self._async_access_token(bff)
         return {
             "authorization": f"Bearer {bff}",
             "adaptor-authorization": access,
@@ -124,9 +127,10 @@ class Authenticator:
 
     async def async_validate_credentials(self) -> None:
         """Prove the username and password work. Used by the config flow."""
-        self.invalidate(access_token_too=True)
-        bff = await self._async_bff_token()
-        await self._async_access_token(bff)
+        async with self._lock:
+            self.invalidate(access_token_too=True)
+            bff = await self._async_bff_token()
+            await self._async_access_token(bff)
 
     async def _async_bff_token(self) -> str:
         if self._bff and self._bff.is_fresh:

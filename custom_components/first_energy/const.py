@@ -7,6 +7,10 @@ from typing import Final
 
 DOMAIN: Final = "first_energy"
 
+# 1st Energy bills in Australian dollars only. Not hass.config.currency: a
+# Home Assistant set to another currency would label these amounts wrongly.
+CURRENCY: Final = "AUD"
+
 CONF_ACCOUNT_ID: Final = "account_id"
 CONF_ACCOUNT_NUMBER: Final = "account_number"
 CONF_BACKFILL_DONE: Final = "backfill_complete"
@@ -20,10 +24,11 @@ CONF_BACKFILL_CURSOR: Final = "backfill_next_day"
 # while four requests a day stays gentle on an undocumented endpoint.
 UPDATE_INTERVAL: Final = timedelta(hours=6)
 
-# Days re-requested on every poll. Statistics writes are idempotent on
-# timestamp, so overlapping repeatedly is free and repairs any gap left by a
-# failed poll or an HA outage without special-case recovery code.
-ROLLING_WINDOW_DAYS: Final = 5
+# Days re-requested on every poll, ending yesterday, inclusive. Statistics
+# writes are idempotent on timestamp, so overlapping repeatedly is free and
+# repairs any gap left by a failed poll or an HA outage without special-case
+# recovery code.
+ROLLING_WINDOW_DAYS: Final = 6
 
 # How far back a first-time backfill reaches. It starts at the account's
 # creation date when that is known, so this only caps long-standing accounts

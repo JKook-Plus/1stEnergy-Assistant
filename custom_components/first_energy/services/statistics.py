@@ -38,7 +38,9 @@ class HourlyBucket:
     start: datetime
     register_id: str
     energy_kwh: float = 0.0
-    cost_aud: float = 0.0
+    # None when the reads carried no cost for this hour, which is not the
+    # same as it costing nothing.
+    cost_aud: float | None = 0.0
     energy_by_tou: dict[str, float] = field(default_factory=dict)
 
     @property
@@ -115,13 +117,19 @@ def bucket_hourly(
             start=hour,
             register_id=reg,
             energy_kwh=round(energy[(hour, reg)], 6),
-            cost_aud=round(cost.get((hour, reg), 0.0), 6),
+            cost_aud=round(cost[(hour, reg)], 6) if (hour, reg) in cost else None,
             energy_by_tou={k: round(v, 6) for k, v in
                            sorted(tou_split.get((hour, reg), {}).items())},
         )
         for hour, reg in sorted(energy, key=lambda k: (k[0], k[1]))
     )
     return BucketResult(buckets=buckets, warnings=tuple(warnings))
+
+
+def _sum_known(values: Iterable[float | None]) -> float | None:
+    """Total of the values that are known; None if none of them are."""
+    known = [v for v in values if v is not None]
+    return round(sum(known), 6) if known else None
 
 
 def combine_registers(buckets: Iterable[HourlyBucket]) -> tuple[HourlyBucket, ...]:
@@ -150,7 +158,7 @@ def combine_registers(buckets: Iterable[HourlyBucket]) -> tuple[HourlyBucket, ..
             start=hour,
             register_id="+".join(sorted(p.register_id for p in parts)),
             energy_kwh=round(sum(p.energy_kwh for p in parts), 6),
-            cost_aud=round(sum(p.cost_aud for p in parts), 6),
+            cost_aud=_sum_known(p.cost_aud for p in parts),
             energy_by_tou={k: round(v, 6) for k, v in sorted(tou.items())},
         ))
     return tuple(combined)
@@ -174,12 +182,12 @@ def cumulative(
     running_cost = cost_offset
     for bucket in buckets:
         running_energy += bucket.energy_kwh
-        running_cost += bucket.cost_aud
+        running_cost += bucket.cost_aud or 0.0
         rows.append({
             "start": bucket.start,
             "state": round(bucket.energy_kwh, 4),
             "sum": round(running_energy, 4),
-            "cost_state": round(bucket.cost_aud, 4),
+            "cost_state": round(bucket.cost_aud or 0.0, 4),
             "cost_sum": round(running_cost, 4),
         })
     return rows
