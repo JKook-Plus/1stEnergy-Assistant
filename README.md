@@ -59,11 +59,12 @@ Sign in with the same email address and password you use at
 `myaccount.1stenergy.com.au`. If the login covers more than one electricity
 account you will be asked which to add; repeat the process to add the others.
 
-On first run the integration walks backwards through your available history in
-the background and imports all of it. How much exists depends on how long you
-have been with 1st Energy — it stops automatically when the data runs out.
-Recent data lands first, so the Energy dashboard becomes useful immediately
-rather than only when the whole backfill finishes.
+On first run the integration imports your available history in the
+background, from the day your account was opened (up to five years back). The
+last few days appear straight away; older history fills in a month at a time,
+oldest first, and each month is saved as it arrives. If the import is
+interrupted by a restart or an error, it picks up where it stopped rather than
+starting again.
 
 ### Adding it to the Energy dashboard
 

@@ -50,5 +50,11 @@
         "name": "Meter data up to"
       }
     }
+  },
+  "issues": {
+    "backfill_failing": {
+      "title": "1st Energy history import keeps failing",
+      "description": "Importing past usage for meter {nmi} has failed {attempts} times in a row. Recent days are still being updated, and each retry continues from where the last one stopped.\n\nLast error: {error}\n\nIf this persists, check the Home Assistant log for details. It clears on its own once an import succeeds."
+    }
   }
 }
