@@ -28,5 +28,8 @@ jobs:
       - name: Lint
         run: uv run ruff check custom_components tests
 
+      - name: Type check
+        run: uv run mypy custom_components
+
       - name: Test
         run: uv run pytest -q

@@ -52,7 +52,7 @@ def _float(value: Any) -> float | None:
         return None
 
 
-def _data(payload: Any, *, what: str) -> dict:
+def _data(payload: Any, *, what: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ParseError(f"{what}: expected an object, got {type(payload).__name__}")
     data = payload.get("data")
@@ -61,12 +61,12 @@ def _data(payload: Any, *, what: str) -> dict:
     return data
 
 
-def _object(value: Any) -> dict:
+def _object(value: Any) -> dict[str, Any]:
     """An optional nested object; anything else counts as absent."""
     return value if isinstance(value, dict) else {}
 
 
-def _records(value: Any, *, what: str) -> list[dict]:
+def _records(value: Any, *, what: str) -> list[dict[str, Any]]:
     """A list of objects, or ParseError.
 
     Callers catch FirstEnergyError. A malformed record would otherwise

@@ -188,8 +188,10 @@ class Authenticator:
 
         try:
             token = json.loads(body)["access_token"]
-        except (ValueError, KeyError) as err:
+        except (ValueError, KeyError, TypeError) as err:
             raise ApiError(200, f"login response had no access_token: {body[:200]}") from err
+        if not isinstance(token, str) or not token:
+            raise ApiError(200, "login response's access_token was not a string")
 
         expiry = decode_jwt_expiry(token) or datetime.now(UTC) + FALLBACK_ACCESS_LIFETIME
         self._access = Token(token, expiry)

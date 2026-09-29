@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
@@ -27,7 +29,7 @@ from .const import (
     ROLLING_WINDOW_DAYS,
     UPDATE_INTERVAL,
 )
-from .domain import Account, Invoice, ServicePoint
+from .domain import Account, Invoice, ServicePoint, UsageDay
 from .services.statistics import bucket_hourly, combine_registers
 from .statistics import async_import_buckets
 
@@ -48,7 +50,7 @@ class FirstEnergyData:
     @property
     def next_invoice(self) -> Invoice | None:
         unpaid = [i for i in self.invoices if not i.is_paid and i.due_date]
-        return min(unpaid, key=lambda i: i.due_date) if unpaid else None
+        return min(unpaid, key=lambda i: i.due_date or date.max) if unpaid else None
 
 
 class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
@@ -136,7 +138,9 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
             hours_imported=hours,
         )
 
-    async def _async_import(self, service_point: ServicePoint, days) -> int:
+    async def _async_import(
+        self, service_point: ServicePoint, days: Sequence[UsageDay]
+    ) -> int:
         """Bucket the active registers, sum them per hour, and write.
 
         A removed register can still report reads for the period it was
@@ -266,13 +270,15 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
                 },
             )
 
-    def _update_entry_data(self, values: dict, *, remove: tuple[str, ...] = ()) -> None:
+    def _update_entry_data(
+        self, values: dict[str, Any], *, remove: tuple[str, ...] = ()
+    ) -> None:
         data = {**self.config_entry.data, **values}
         for key in remove:
             data.pop(key, None)
         self.hass.config_entries.async_update_entry(self.config_entry, data=data)
 
-    async def _call(self, awaitable):
+    async def _call[T](self, awaitable: Awaitable[T]) -> T:
         """Translate client errors into the outcomes Home Assistant expects."""
         try:
             return await awaitable

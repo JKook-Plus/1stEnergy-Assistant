@@ -18,16 +18,17 @@ import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
 from homeassistant.components.recorder.models.statistics import StatisticMeanType
 from homeassistant.components.recorder.statistics import (
+    StatisticsRow,
     async_add_external_statistics,
     get_last_statistics,
     statistics_during_period,
 )
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.recorder import get_instance
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, STAT_COST, STAT_ENERGY, statistic_id
@@ -46,7 +47,7 @@ _BEGINNING = datetime(2000, 1, 1, tzinfo=UTC)
 
 async def _async_rows(
     hass: HomeAssistant, stat_id: str, start: datetime, end: datetime | None
-) -> list[dict]:
+) -> list[StatisticsRow]:
     """Stored hourly rows with `start <= row start < end`, oldest first."""
     rows = await get_instance(hass).async_add_executor_job(
         statistics_during_period,
@@ -55,7 +56,7 @@ async def _async_rows(
     return rows.get(stat_id) or []
 
 
-async def _async_last_row(hass: HomeAssistant, stat_id: str) -> dict | None:
+async def _async_last_row(hass: HomeAssistant, stat_id: str) -> StatisticsRow | None:
     last = await get_instance(hass).async_add_executor_job(
         get_last_statistics, hass, 1, stat_id, True, {"state", "sum"}
     )
@@ -113,7 +114,7 @@ async def _async_write_series(
         running += value
         rows.append(StatisticData(start=hour, state=value, sum=running))
 
-    later: list[dict] = []
+    later: list[StatisticsRow] = []
     last = await _async_last_row(hass, stat_id)
     if last is not None and dt_util.utc_from_timestamp(last["start"]) > last_hour:
         later = await _async_rows(hass, stat_id, last_hour + timedelta(hours=1), None)
@@ -124,14 +125,14 @@ async def _async_write_series(
             "Shifting %d later %s rows by %.6f after rewriting %s .. %s",
             len(later), stat_id, delta, first_hour.isoformat(), last_hour.isoformat(),
         )
-        rows.extend(
-            StatisticData(
+        for row in later:
+            shifted = StatisticData(
                 start=dt_util.utc_from_timestamp(row["start"]),
-                state=row.get("state"),
                 sum=float(row.get("sum") or 0.0) + delta,
             )
-            for row in later
-        )
+            if (state := row.get("state")) is not None:
+                shifted["state"] = state
+            rows.append(shifted)
 
     async_add_external_statistics(hass, metadata, rows)
 

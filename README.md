@@ -104,6 +104,7 @@ of version control — `.gitignore` here already excludes `*.har`.
 uv sync --group dev
 uv run pytest
 uv run ruff check custom_components tests
+uv run mypy custom_components
 ```
 
 Tests run against synthetic payloads in the shape the API returns
