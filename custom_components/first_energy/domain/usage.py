@@ -38,8 +38,12 @@ class UsageDay:
 
         In that case the API still returns 288 slots, but all zero, and
         `interval_minutes` is 0 — so never divide by it without checking.
+
+        The interval length is the signal, not the values: a day with no
+        consumption at all (away, power off) is real data whose hours are
+        zero. Skipping it would leave a gap in the series.
         """
-        return self.interval_minutes > 0 and any(self.intervals)
+        return self.interval_minutes > 0 and len(self.intervals) > 0
 
     @property
     def expected_slots(self) -> int | None:

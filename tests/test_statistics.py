@@ -96,6 +96,12 @@ class TestDaylightSaving:
         assert len({b.start for b in result.buckets}) == 25
         assert sum(b.energy_kwh for b in result.buckets) == pytest.approx(30.0)
 
+    def test_zero_consumption_day_yields_24_zero_buckets(self):
+        """No usage is real data; skipping the day would leave a gap."""
+        result = bucket_hourly([make_day(date(2026, 8, 12), 288, kwh=0.0)], SYDNEY)
+        assert len(result.buckets) == 24
+        assert all(b.energy_kwh == 0.0 for b in result.buckets)
+
     def test_normal_day_raises_no_warning(self):
         result = bucket_hourly([make_day(date(2026, 8, 12), 288)], SYDNEY)
         assert len(result.buckets) == 24

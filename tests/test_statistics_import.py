@@ -161,3 +161,97 @@ class TestReimportIsIdempotent:
         assert energy[-1]["sum"] == pytest.approx(36.0)
         sums = [r["sum"] for r in energy]
         assert all(b >= a for a, b in pairwise(sums))
+
+
+async def all_rows(hass: HomeAssistant, kind: str = STAT_ENERGY):
+    return await read_back(hass, kind, end=START + timedelta(days=30))
+
+
+def assert_monotonic(rows):
+    sums = [r["sum"] for r in rows]
+    assert all(b >= a - 1e-9 for a, b in pairwise(sums)), sums
+
+
+class TestBaselineAcrossGaps:
+    """The baseline is the last stored row before an import, however far back."""
+
+    async def test_an_import_after_a_gap_continues_the_total(
+        self, recorder_mock, enable_custom_integrations, hass: HomeAssistant
+    ):
+        await async_import_buckets(hass, NMI, buckets(24), display_name="test")
+        # Nothing for hours 24-47, then an import starting inside the gap.
+        await async_import_buckets(
+            hass, NMI, buckets(12, start=START + timedelta(hours=36)), display_name="test"
+        )
+
+        energy = await all_rows(hass)
+        assert len(energy) == 36
+        assert energy[24]["sum"] == pytest.approx(25.0)  # not reset to 1.0
+        assert energy[-1]["sum"] == pytest.approx(36.0)
+        assert_monotonic(energy)
+
+    async def test_filling_a_gap_carries_later_rows_along(
+        self, recorder_mock, enable_custom_integrations, hass: HomeAssistant
+    ):
+        await async_import_buckets(hass, NMI, buckets(24), display_name="test")
+        await async_import_buckets(
+            hass, NMI, buckets(24, start=START + timedelta(hours=48)), display_name="test"
+        )
+        # The missing day arrives late.
+        await async_import_buckets(
+            hass, NMI, buckets(24, start=START + timedelta(hours=24)), display_name="test"
+        )
+
+        energy = await all_rows(hass)
+        assert len(energy) == 72
+        assert [r["sum"] for r in energy] == pytest.approx([float(i + 1) for i in range(72)])
+
+    async def test_cost_follows_the_same_rules(
+        self, recorder_mock, enable_custom_integrations, hass: HomeAssistant
+    ):
+        await async_import_buckets(hass, NMI, buckets(24), display_name="test")
+        await async_import_buckets(
+            hass, NMI, buckets(12, start=START + timedelta(hours=36)), display_name="test"
+        )
+        cost = await all_rows(hass, STAT_COST)
+        assert cost[-1]["sum"] == pytest.approx(36 * 0.25)
+        assert_monotonic(cost)
+
+    async def test_older_history_written_after_newer_never_resets_the_total(
+        self, recorder_mock, enable_custom_integrations, hass: HomeAssistant
+    ):
+        """A backfill can land after the rolling window has already written."""
+        await async_import_buckets(
+            hass, NMI, buckets(24, start=START + timedelta(hours=48)), display_name="test"
+        )
+        await async_import_buckets(hass, NMI, buckets(48), display_name="test")
+
+        energy = await all_rows(hass)
+        assert [r["sum"] for r in energy] == pytest.approx([float(i + 1) for i in range(72)])
+
+
+class TestZeroConsumptionDays:
+    async def test_a_zero_day_is_written_and_later_corrected(
+        self, recorder_mock, enable_custom_integrations, hass: HomeAssistant
+    ):
+        await async_import_buckets(hass, NMI, buckets(24), display_name="test")
+        await async_import_buckets(
+            hass, NMI, buckets(24, start=START + timedelta(hours=24), kwh=0.0),
+            display_name="test",
+        )
+        await async_import_buckets(
+            hass, NMI, buckets(24, start=START + timedelta(hours=48)), display_name="test"
+        )
+        energy = await all_rows(hass)
+        assert len(energy) == 72
+        assert energy[-1]["sum"] == pytest.approx(48.0)
+
+        # The retailer revises the zero day with real reads.
+        await async_import_buckets(
+            hass, NMI, buckets(24, start=START + timedelta(hours=24), kwh=0.5),
+            display_name="test",
+        )
+        energy = await all_rows(hass)
+        assert energy[47]["sum"] == pytest.approx(36.0)
+        assert energy[-1]["sum"] == pytest.approx(60.0)
+        assert_monotonic(energy)
