@@ -86,6 +86,24 @@ it picks up where it stopped.
 If 1st Energy ever rejects the saved password, Home Assistant raises a
 re-authentication prompt, and your history is kept.
 
+## Options
+
+**Settings → Devices & services → 1st Energy → Configure.**
+
+| Option | What it does |
+|---|---|
+| **Include GST** | Adds 10% GST to every cost statistic and to the **Current price** sensor. Off by default. |
+
+1st Energy's API prices everything excluding GST, as the Consumer Data
+Right standard requires, while the bill includes it. Turn this on for costs
+that match the bill, or to compare against another retailer's GST-inclusive
+history on the Energy dashboard. The balance and invoice sensors are the
+billed amounts, which already include GST, so they don't change.
+
+Changing it runs the history import again from the start, so past days are
+rewritten on the new basis rather than left mixed. That takes a few
+minutes; the Energy dashboard keeps working meanwhile.
+
 ## Add it to the Energy dashboard
 
 Nothing appears automatically; you have to point the dashboard at the
@@ -121,9 +139,9 @@ left out. Statistics are named `first_energy:energy_<nmi>` and
 
 The cost is the usage charge for each hour plus the plan's **daily supply
 charge**, spread evenly over the day's hours, so a day's cost matches what
-it adds to the bill. It is **exclusive of GST** and before any pay-on-time
-discount, because that is how the API prices it. Days outside every plan
-the account reports get no supply charge.
+it adds to the bill. It is **exclusive of GST** unless you turn on
+[Include GST](#options), and always before any pay-on-time discount.
+Days outside every plan the account reports get no supply charge.
 
 ### Peak and off-peak
 
@@ -155,7 +173,7 @@ Each account gets a device, **1st Energy \<account number\>**, with:
 | **Next invoice amount** | The unpaid invoice due soonest, in AUD |
 | **Next invoice due** | Its due date |
 | **Meter data up to** | The latest day with meter data, which shows the one-day lag at a glance |
-| **Current price** | The usage rate in force right now, in AUD/kWh, excluding GST |
+| **Current price** | The usage rate in force right now, in AUD/kWh; excluding GST unless [Include GST](#options) is on. The `includes_gst` attribute says which |
 | **Current period** | Peak, off-peak, shoulder or solar sponge, whichever the plan says applies now |
 | **Plan ends** | The date your current plan ends, when the rates may change |
 
@@ -203,8 +221,9 @@ retry continues from where the last one stopped; the repair clears itself
 once an attempt succeeds.
 
 **History re-imports after an update.** Some updates fix how past data was
-stored and re-run the history import once to correct it. That's expected;
-the dashboard keeps working while it runs.
+stored and re-run the history import once to correct it, and changing the
+[Include GST](#options) option does the same. That's expected; the
+dashboard keeps working while it runs.
 
 **Numbers stop updating.** Check the **Meter data up to** sensor: if it's
 yesterday, everything is current. Enable debug logging to see what the

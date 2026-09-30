@@ -25,13 +25,20 @@ from .const import (
     BACKFILL_MAX_SKIPPED_POLLS,
     CONF_BACKFILL_CURSOR,
     CONF_BACKFILL_DONE,
+    CONF_INCLUDE_GST,
     DOMAIN,
+    GST_MULTIPLIER,
     MAX_BACKFILL_DAYS,
     ROLLING_WINDOW_DAYS,
     UPDATE_INTERVAL,
 )
 from .domain import Account, Invoice, Plan, ServicePoint, UsageDay, plan_on
-from .services.statistics import add_daily_charge, bucket_hourly, combine_registers
+from .services.statistics import (
+    add_daily_charge,
+    bucket_hourly,
+    combine_registers,
+    scale_costs,
+)
 from .statistics import async_import_buckets
 
 _LOGGER = logging.getLogger(__name__)
@@ -87,6 +94,11 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
         # from. Interleaved, one would read a total the other is about to
         # rewrite.
         self._import_lock = asyncio.Lock()
+
+    @property
+    def include_gst(self) -> bool:
+        """Whether costs and prices are stored and shown with GST added."""
+        return bool(self.config_entry.options.get(CONF_INCLUDE_GST, False))
 
     async def _async_setup(self) -> None:
         """One-off discovery, run before the first refresh."""
@@ -173,7 +185,7 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
         general one, and a smart meter also reports reactive energy. Only
         CURRENT import registers count, and they are summed into the
         meter's single series. The plan's daily supply charge is added to
-        the cost, which the reads leave out.
+        the cost, which the reads leave out, and GST if the option is on.
         """
         if not days:
             return 0
@@ -192,6 +204,8 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
             _LOGGER.info("Interval count anomaly: %s", warning)
         buckets = add_daily_charge(
             combine_registers(result.buckets), tz, self._supply_charge)
+        if self.include_gst:
+            buckets = scale_costs(buckets, float(GST_MULTIPLIER))
         return await async_import_buckets(
             self.hass,
             service_point.nmi,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import timedelta
+from decimal import Decimal
 from typing import Final
 
 DOMAIN: Final = "first_energy"
@@ -18,6 +19,12 @@ CONF_BACKFILL_DONE: Final = "backfill_complete"
 # First day the backfill has not yet imported, as an ISO date. Written after
 # every chunk, so a restart resumes rather than starting over.
 CONF_BACKFILL_CURSOR: Final = "backfill_next_day"
+
+# Option: add GST to every cost and price. The API's prices exclude it, as
+# the Consumer Data Right standard requires, while the bill includes it.
+# Off by default, which is how the integration has always stored costs.
+CONF_INCLUDE_GST: Final = "include_gst"
+GST_MULTIPLIER: Final = Decimal("1.1")
 
 # Meter data lags roughly a day, so there is nothing to gain from frequent
 # polling. Six hours is a compromise: a once-daily poll could add almost another

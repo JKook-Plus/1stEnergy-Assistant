@@ -6,12 +6,26 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+    OptionsFlowWithReload,
+)
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import ApiError, AuthenticationError, FirstEnergyClient, FirstEnergyError
-from .const import CONF_ACCOUNT_ID, CONF_ACCOUNT_NUMBER, DOMAIN
+from .const import (
+    CONF_ACCOUNT_ID,
+    CONF_ACCOUNT_NUMBER,
+    CONF_BACKFILL_CURSOR,
+    CONF_BACKFILL_DONE,
+    CONF_INCLUDE_GST,
+    DOMAIN,
+)
 from .domain import Account
 
 _LOGGER = logging.getLogger(__name__)
@@ -19,6 +33,10 @@ _LOGGER = logging.getLogger(__name__)
 STEP_USER_SCHEMA = vol.Schema({
     vol.Required(CONF_USERNAME): str,
     vol.Required(CONF_PASSWORD): str,
+})
+
+OPTIONS_SCHEMA = vol.Schema({
+    vol.Required(CONF_INCLUDE_GST, default=False): bool,
 })
 
 
@@ -34,6 +52,11 @@ class FirstEnergyConfigFlow(ConfigFlow, domain=DOMAIN):
     # 5: re-run the backfill, to add the daily supply charge to cost.
     # 6: re-run the backfill, to write the per-band series for past days.
     MINOR_VERSION = 6
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        return FirstEnergyOptionsFlow()
 
     def __init__(self) -> None:
         self._username: str | None = None
@@ -152,4 +175,28 @@ class FirstEnergyConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
             description_placeholders={"username": entry.data[CONF_USERNAME]},
             errors=errors,
+        )
+
+
+class FirstEnergyOptionsFlow(OptionsFlowWithReload):
+    """Whether costs include GST. Saving reloads the entry."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            entry = self.config_entry
+            if user_input[CONF_INCLUDE_GST] != entry.options.get(CONF_INCLUDE_GST, False):
+                # Every stored cost is on the old basis. Run the history
+                # import again, from the start, to rewrite it on the new one.
+                data = {**entry.data}
+                data.pop(CONF_BACKFILL_DONE, None)
+                data.pop(CONF_BACKFILL_CURSOR, None)
+                self.hass.config_entries.async_update_entry(entry, data=data)
+            return self.async_create_entry(data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self.add_suggested_values_to_schema(
+                OPTIONS_SCHEMA, self.config_entry.options),
         )

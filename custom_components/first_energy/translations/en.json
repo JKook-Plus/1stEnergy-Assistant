@@ -35,6 +35,19 @@
       "reauth_successful": "Reconnected to 1st Energy."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "1st Energy options",
+        "data": {
+          "include_gst": "Include GST"
+        },
+        "data_description": {
+          "include_gst": "Add 10% GST to the imported costs and the current price, so they match the bill. 1st Energy's prices exclude it. Changing this imports your history again, which takes a few minutes; the Energy dashboard keeps working while it runs."
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "balance": {
