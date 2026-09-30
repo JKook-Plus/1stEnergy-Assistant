@@ -190,6 +190,11 @@ integrations that must log in with a password, but it is worth knowing:
 anyone who can read that directory can read the password. The integration
 only reads from your account; it never changes anything.
 
+The password is sent to 1st Energy once each time Home Assistant starts.
+After that, the session is kept alive with the refresh token the login
+returns, which is held in memory only and never written to disk. The
+password is sent again only if 1st Energy refuses a refresh.
+
 If you capture HAR files while investigating the API yourself, they
 contain your password, live tokens, NMI and address in plain text. Keep
 them out of version control; `.gitignore` here already excludes `*.har`.
