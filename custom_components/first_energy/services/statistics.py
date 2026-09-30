@@ -217,3 +217,20 @@ def add_daily_charge(
                 supply_aud=bucket.supply_aud + share,
             )
     return tuple(out)
+
+
+def scale_costs(buckets: Iterable[HourlyBucket], factor: float) -> tuple[HourlyBucket, ...]:
+    """Multiply every cost in the buckets by `factor`, energy untouched.
+
+    Used to add GST: the reads and the plan's rates exclude it. The total,
+    each band and the supply share are all scaled, so they still add up.
+    """
+    return tuple(
+        replace(
+            bucket,
+            cost_aud=bucket.cost_aud * factor if bucket.cost_aud is not None else None,
+            cost_by_tou={band: aud * factor for band, aud in bucket.cost_by_tou.items()},
+            supply_aud=bucket.supply_aud * factor,
+        )
+        for bucket in buckets
+    )

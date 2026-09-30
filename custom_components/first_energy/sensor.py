@@ -33,7 +33,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from . import FirstEnergyConfigEntry
-from .const import CURRENCY, DOMAIN
+from .const import CURRENCY, DOMAIN, GST_MULTIPLIER
 from .coordinator import FirstEnergyCoordinator, FirstEnergyData
 from .domain import Plan, Rate, plan_on
 
@@ -129,12 +129,30 @@ DIAGNOSTIC_SENSORS: tuple[FirstEnergySensorDescription, ...] = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class Tariff:
+    """The plan and rate in force at a moment, as the sensors show them."""
+
+    plan: Plan | None
+    rate: Rate | None
+    includes_gst: bool
+
+    @property
+    def price(self) -> Decimal | None:
+        """The rate's unit price, with GST added if the option is on."""
+        if self.rate is None:
+            return None
+        if self.includes_gst:
+            return self.rate.unit_price * GST_MULTIPLIER
+        return self.rate.unit_price
+
+
 @dataclass(frozen=True, kw_only=True)
 class FirstEnergyTariffSensorDescription(SensorEntityDescription):
     """A sensor read from the plan at the current local time."""
 
-    value: Callable[[Plan | None, Rate | None], Decimal | date | str | None]
-    attributes: Callable[[Plan | None, Rate | None], dict[str, Any]] = lambda plan, rate: {}
+    value: Callable[[Tariff], Decimal | date | str | None]
+    attributes: Callable[[Tariff], dict[str, Any]] = lambda tariff: {}
 
 
 def _current_plan(plans: tuple[Plan, ...], today: date) -> Plan | None:
@@ -155,10 +173,10 @@ TARIFF_SENSORS: tuple[FirstEnergyTariffSensorDescription, ...] = (
         native_unit_of_measurement=f"{CURRENCY}/{UnitOfEnergy.KILO_WATT_HOUR}",
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=4,
-        value=lambda plan, rate: rate.unit_price if rate else None,
-        attributes=lambda plan, rate: {
-            "rate": rate.name if rate else None,
-            "includes_gst": False,
+        value=lambda tariff: tariff.price,
+        attributes=lambda tariff: {
+            "rate": tariff.rate.name if tariff.rate else None,
+            "includes_gst": tariff.includes_gst,
         },
     ),
     FirstEnergyTariffSensorDescription(
@@ -166,16 +184,18 @@ TARIFF_SENSORS: tuple[FirstEnergyTariffSensorDescription, ...] = (
         translation_key="current_period",
         device_class=SensorDeviceClass.ENUM,
         options=TOU_BANDS,
-        value=lambda plan, rate: rate.band if rate and rate.band in TOU_BANDS else None,
+        value=lambda tariff: (
+            tariff.rate.band if tariff.rate and tariff.rate.band in TOU_BANDS else None),
     ),
     FirstEnergyTariffSensorDescription(
         key="plan_end",
         translation_key="plan_end",
         device_class=SensorDeviceClass.DATE,
-        value=lambda plan, rate: plan.end_date if plan else None,
-        attributes=lambda plan, rate: {
-            "plan": plan.name if plan else None,
-            "start_date": plan.start_date.isoformat() if plan and plan.start_date else None,
+        value=lambda tariff: tariff.plan.end_date if tariff.plan else None,
+        attributes=lambda tariff: {
+            "plan": tariff.plan.name if tariff.plan else None,
+            "start_date": (tariff.plan.start_date.isoformat()
+                           if tariff.plan and tariff.plan.start_date else None),
         },
     ),
 )
@@ -259,18 +279,18 @@ class FirstEnergyTariffSensor(CoordinatorEntity[FirstEnergyCoordinator], SensorE
         tz = ZoneInfo(self.coordinator.data.service_point.timezone_name)
         return dt_util.now(tz)
 
-    def _current(self) -> tuple[Plan | None, Rate | None]:
+    def _current(self) -> Tariff:
         now = self._now()
         plan = _current_plan(self.coordinator.data.plans, now.date())
-        return plan, plan.rate_at(now) if plan else None
+        return Tariff(plan, plan.rate_at(now) if plan else None, self.coordinator.include_gst)
 
     @property
     def native_value(self) -> Decimal | date | str | None:
-        return self.entity_description.value(*self._current())
+        return self.entity_description.value(self._current())
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return self.entity_description.attributes(*self._current())
+        return self.entity_description.attributes(self._current())
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

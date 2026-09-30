@@ -7,8 +7,9 @@ and read real entity states without an HTTP server.
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import patch
 
 from conftest import load
@@ -50,13 +51,24 @@ class FakeClient:
     async def async_get_usage(self, *args, **kwargs):
         return ()
 
+    # Every backfill started, as (service point, oldest day) pairs.
+    backfills: ClassVar[list[tuple[str, date]]] = []
 
-async def async_setup_integration(hass: HomeAssistant) -> MockConfigEntry:
+    async def async_iter_usage_range(self, service_point_id, oldest, newest):
+        self.backfills.append((service_point_id, oldest))
+        return
+        yield
+
+
+async def async_setup_integration(
+    hass: HomeAssistant, options: dict[str, Any] | None = None
+) -> MockConfigEntry:
     """Load a config entry backed by `FakeClient`, backfill already done."""
     entry = MockConfigEntry(
         domain=DOMAIN, version=1, minor_version=6, unique_id=ACCOUNT_ID,
         data={"username": "user@example.com", "password": "hunter2",
               CONF_ACCOUNT_ID: ACCOUNT_ID, CONF_BACKFILL_DONE: True},
+        options=options or {},
     )
     entry.add_to_hass(hass)
     with patch("custom_components.first_energy.FirstEnergyClient", FakeClient):
