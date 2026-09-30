@@ -155,7 +155,7 @@ class TestUnits:
         metadata = await hass.async_add_executor_job(
             lambda: get_metadata(hass, statistic_ids={entity_id}))
         assert metadata[entity_id][1]["unit_of_measurement"] == "AUD"
-        assert entry.minor_version == 4
+        assert entry.minor_version == 5
 
 
 class TestParserRobustness:
@@ -194,6 +194,7 @@ class TestRollingWindow:
         self, recorder_mock, enable_custom_integrations, hass: HomeAssistant
     ):
         client = MagicMock()
+        client.async_get_plans = AsyncMock(return_value=())
         client.async_get_balance = AsyncMock(return_value=None)
         client.async_get_invoices = AsyncMock(return_value=())
         client.async_get_usage = AsyncMock(return_value=())

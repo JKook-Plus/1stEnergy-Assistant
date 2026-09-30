@@ -31,7 +31,8 @@ class FirstEnergyConfigFlow(ConfigFlow, domain=DOMAIN):
     # 3: the balance sensor's unit went from "$" to "AUD".
     # 4: re-run the backfill, to fill days lost to short usage pages and drop
     # reactive-energy registers from consumption.
-    MINOR_VERSION = 4
+    # 5: re-run the backfill, to add the daily supply charge to cost.
+    MINOR_VERSION = 5
 
     def __init__(self) -> None:
         self._username: str | None = None

@@ -102,6 +102,15 @@ async def async_migrate_entry(hass: HomeAssistant, entry: FirstEnergyConfigEntry
         hass.config_entries.async_update_entry(entry, data=data, minor_version=4)
         _LOGGER.info("Re-importing 1st Energy history to fill missing days")
 
+    if entry.minor_version < 5:
+        # Versions before 1.5 left the daily supply charge out of the cost
+        # statistic. Re-import so past days include it.
+        data = {**entry.data}
+        data.pop(CONF_BACKFILL_DONE, None)
+        data.pop(CONF_BACKFILL_CURSOR, None)
+        hass.config_entries.async_update_entry(entry, data=data, minor_version=5)
+        _LOGGER.info("Re-importing 1st Energy history to add the daily supply charge")
+
     return True
 
 

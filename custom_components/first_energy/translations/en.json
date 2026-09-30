@@ -48,6 +48,21 @@
       },
       "last_read_date": {
         "name": "Meter data up to"
+      },
+      "current_price": {
+        "name": "Current price"
+      },
+      "current_period": {
+        "name": "Current period",
+        "state": {
+          "peak": "Peak",
+          "off_peak": "Off-peak",
+          "shoulder": "Shoulder",
+          "solar_sponge": "Solar sponge"
+        }
+      },
+      "plan_end": {
+        "name": "Plan ends"
       }
     }
   },

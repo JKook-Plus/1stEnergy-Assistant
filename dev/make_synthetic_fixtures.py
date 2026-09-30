@@ -46,6 +46,34 @@ def band(hour: int) -> str:
     return "Off Peak"
 
 
+# Daily supply charge, in the same GST-exclusive terms as RATES.
+SUPPLY_CHARGE = "1.10000"
+ALL_DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN", "PUBLIC_HOLIDAYS"]
+
+
+def tariff_period(name: str, kind: str, windows: list[tuple[str, str]],
+                  supply: str | None = None) -> dict:
+    """One rate in a period of its own, the way 1st Energy lays them out."""
+    period = {
+        "type": "RETAIL_SERVICE",
+        "displayName": f"{name} Usage",
+        "startDate": "06-26",
+        "endDate": "06-25",
+        "timeZone": "LOCAL",
+        "rateBlockUType": "timeOfUseRates",
+        "timeOfUseRates": [{
+            "displayName": f"{name} Usage",
+            "type": kind,
+            "rates": [{"unitPrice": f"{RATES[name]:.7f}", "measureUnit": "KWH", "volume": 0.0}],
+            "timeOfUse": [{"startTime": start, "endTime": end, "days": ALL_DAYS}
+                          for start, end in windows],
+        }],
+    }
+    if supply is not None:
+        period["dailySupplyCharge"] = supply
+    return period
+
+
 def usage_day(day: date) -> dict:
     """One register's 5-minute reads for one day, with matching aggregates."""
     rng = random.Random(day.toordinal())
@@ -140,6 +168,45 @@ def fixtures() -> dict[str, dict]:
                     "plans": [],
                     "servicePoints": [],
                 }],
+            },
+        },
+        # The account detail, carrying the plan and its tariff. Matches band():
+        # the supply charge sits on one period only, as on the live account.
+        "account_detail": {
+            "data": {
+                "accountId": ACCOUNT_ID,
+                "accountNumber": ACCOUNT_NUMBER,
+                "displayName": "<redacted:displayname>",
+                "openStatus": "OPEN",
+                "creationDate": "2026-06-26",
+                "plans": [{
+                    "planOverview": {
+                        "displayName": "Residential Time of Use",
+                        "startDate": "2026-06-26",
+                        "endDate": "2027-06-25",
+                    },
+                    "planDetail": {
+                        "fuelType": "ELECTRICITY",
+                        "isContingentPlan": False,
+                        "electricityContract": {
+                            "pricingModel": "TIME_OF_USE",
+                            "timeZone": "LOCAL",
+                            "isFixed": False,
+                            "paymentOption": ["PAPER_BILL"],
+                            "tariffPeriod": [
+                                tariff_period("Off Peak", "OFF_PEAK",
+                                              [("00:00:00", "06:59:59"),
+                                               ("22:00:00", "23:59:59")]),
+                                tariff_period("Shoulder", "SHOULDER",
+                                              [("07:00:00", "15:59:59"),
+                                               ("20:00:00", "21:59:59")]),
+                                tariff_period("Peak", "PEAK", [("16:00:00", "19:59:59")],
+                                              supply=SUPPLY_CHARGE),
+                            ],
+                        },
+                    },
+                }],
+                "servicePoints": [{"servicePointId": SERVICE_POINT_ID}],
             },
         },
         "account_balance": {"data": {"accountId": ACCOUNT_ID, "balance": "151.87"}},
