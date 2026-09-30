@@ -66,6 +66,10 @@ class Meter:
     meter_id: str
     status: str | None
     registers: tuple[Register, ...] = field(default_factory=tuple)
+    # AEMO codes: installation type such as COMMS4D (a remotely read
+    # interval meter), and read type such as RWDA.
+    installation_type: str | None = None
+    read_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +86,13 @@ class ServicePoint:
     jurisdiction_code: str | None
     is_generator: bool
     meters: tuple[Meter, ...] = field(default_factory=tuple)
+    # The local network service provider, who owns the poles and wires.
+    distributor: str | None = None
+    # Scales metered energy up to what was drawn at the transmission
+    # network, for network charges. 1.103 means 10.3% more.
+    loss_factor: float | None = None
+    loss_factor_code: str | None = None
+    loss_factor_description: str | None = None
 
     @property
     def active_registers(self) -> tuple[Register, ...]:
@@ -91,6 +102,20 @@ class ServicePoint:
     def consumption_registers(self) -> tuple[Register, ...]:
         """The live registers whose reads add up to grid usage."""
         return tuple(r for r in self.active_registers if r.measures_consumption)
+
+    @property
+    def consumption_meter(self) -> Meter | None:
+        """The meter carrying the first live consumption register."""
+        for meter in self.meters:
+            if any(r.is_active and r.measures_consumption for r in meter.registers):
+                return meter
+        return None
+
+    @property
+    def network_tariff_code(self) -> str | None:
+        """The network tariff on the first live consumption register."""
+        return next((r.network_tariff_code for r in self.consumption_registers
+                     if r.network_tariff_code), None)
 
     @property
     def timezone_name(self) -> str:

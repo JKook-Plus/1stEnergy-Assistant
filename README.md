@@ -159,6 +159,13 @@ Each account gets a device, **1st Energy \<account number\>**, with:
 | **Current period** | Peak, off-peak, shoulder or solar sponge, whichever the plan says applies now |
 | **Plan ends** | The date your current plan ends, when the rates may change |
 
+Under **Diagnostic** on the same device are the connection's details:
+**NMI**, **Distributor** (the network operator, such as Essential Energy),
+**Network tariff** (the distributor's tariff code), **Distribution loss
+factor**, and **Meter** (its number, with the installation type, read type
+and live registers as attributes). They're what a distributor or retailer
+will ask for if something needs sorting out.
+
 The price and period follow the plan's time-of-use windows in the meter's
 local time, and change on the minute the window does. They are for
 automations, such as running an appliance off-peak; the Energy dashboard's

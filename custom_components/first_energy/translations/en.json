@@ -63,6 +63,21 @@
       },
       "plan_end": {
         "name": "Plan ends"
+      },
+      "nmi": {
+        "name": "NMI"
+      },
+      "distributor": {
+        "name": "Distributor"
+      },
+      "network_tariff": {
+        "name": "Network tariff"
+      },
+      "loss_factor": {
+        "name": "Distribution loss factor"
+      },
+      "meter": {
+        "name": "Meter"
       }
     }
   },

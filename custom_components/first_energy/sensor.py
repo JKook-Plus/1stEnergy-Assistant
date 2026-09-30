@@ -24,7 +24,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import UnitOfEnergy
+from homeassistant.const import EntityCategory, UnitOfEnergy
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -43,7 +43,8 @@ TOU_BANDS = ["peak", "off_peak", "shoulder", "solar_sponge"]
 
 @dataclass(frozen=True, kw_only=True)
 class FirstEnergySensorDescription(SensorEntityDescription):
-    value: Callable[[FirstEnergyData], Decimal | date | str | None]
+    value: Callable[[FirstEnergyData], Decimal | date | float | str | None]
+    attributes: Callable[[FirstEnergyData], dict[str, Any]] | None = None
 
 
 SENSORS: tuple[FirstEnergySensorDescription, ...] = (
@@ -76,6 +77,54 @@ SENSORS: tuple[FirstEnergySensorDescription, ...] = (
         # empty-looking Energy dashboard can be recognised as normal rather
         # than as a broken integration.
         value=lambda data: data.last_read_date,
+    ),
+)
+
+
+# Facts about the connection and meter. They rarely change, but they are
+# what a distributor or retailer asks for, and the tariff code decides the
+# network charges.
+DIAGNOSTIC_SENSORS: tuple[FirstEnergySensorDescription, ...] = (
+    FirstEnergySensorDescription(
+        key="nmi",
+        translation_key="nmi",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value=lambda data: data.service_point.nmi,
+    ),
+    FirstEnergySensorDescription(
+        key="distributor",
+        translation_key="distributor",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value=lambda data: data.service_point.distributor,
+    ),
+    FirstEnergySensorDescription(
+        key="network_tariff",
+        translation_key="network_tariff",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value=lambda data: data.service_point.network_tariff_code,
+    ),
+    FirstEnergySensorDescription(
+        key="loss_factor",
+        translation_key="loss_factor",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        suggested_display_precision=4,
+        value=lambda data: data.service_point.loss_factor,
+        attributes=lambda data: {
+            "code": data.service_point.loss_factor_code,
+            "description": data.service_point.loss_factor_description,
+        },
+    ),
+    FirstEnergySensorDescription(
+        key="meter",
+        translation_key="meter",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value=lambda data: m.meter_id if (m := data.service_point.consumption_meter) else None,
+        attributes=lambda data: {
+            "installation_type": m.installation_type if (
+                m := data.service_point.consumption_meter) else None,
+            "read_type": m.read_type if m else None,
+            "registers": [r.register_id for r in data.service_point.active_registers],
+        },
     ),
 )
 
@@ -139,7 +188,8 @@ async def async_setup_entry(
 ) -> None:
     coordinator = entry.runtime_data
     async_add_entities(
-        FirstEnergySensor(coordinator, description) for description in SENSORS
+        FirstEnergySensor(coordinator, description)
+        for description in (*SENSORS, *DIAGNOSTIC_SENSORS)
     )
     async_add_entities(
         FirstEnergyTariffSensor(coordinator, description) for description in TARIFF_SENSORS
@@ -172,8 +222,14 @@ class FirstEnergySensor(CoordinatorEntity[FirstEnergyCoordinator], SensorEntity)
         self._attr_device_info = _device_info(coordinator)
 
     @property
-    def native_value(self) -> Decimal | date | str | None:
+    def native_value(self) -> Decimal | date | float | str | None:
         return self.entity_description.value(self.coordinator.data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if self.entity_description.attributes is None:
+            return None
+        return self.entity_description.attributes(self.coordinator.data)
 
 
 class FirstEnergyTariffSensor(CoordinatorEntity[FirstEnergyCoordinator], SensorEntity):
