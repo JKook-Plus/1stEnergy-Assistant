@@ -233,10 +233,23 @@ def fixtures() -> dict[str, dict]:
                 "servicePointStatus": "ACTIVE",
                 "jurisdictionCode": "NSW",
                 "isGenerator": False,
+                "distributionLossFactor": {
+                    "code": "XX0A",
+                    "description": "Low Voltage Urban",
+                    "lossValue": "1.0580",
+                },
+                "relatedParticipants": [
+                    {"party": "Example Networks", "role": "LNSP"},
+                    {"party": "1st Energy", "role": "FRMP"},
+                ],
                 "meters": [
                     {
                         "meterId": "M1",
-                        "specifications": {"status": "CURRENT"},
+                        "specifications": {
+                            "status": "CURRENT",
+                            "installationType": "COMMS4D",
+                            "readType": "RWDA",
+                        },
                         "registers": [{
                             "registerId": "E1",
                             "status": "CURRENT",

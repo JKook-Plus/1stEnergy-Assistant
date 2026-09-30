@@ -263,11 +263,21 @@ def parse_service_point(payload: Any) -> ServicePoint:
             meter_id=str(raw_meter.get("meterId", "")),
             status=specs.get("status"),
             registers=registers,
+            installation_type=specs.get("installationType"),
+            read_type=specs.get("readType"),
         ))
 
     nmi = data.get("nationalMeteringId")
     if not nmi:
         raise ParseError("service point: missing 'nationalMeteringId'")
+
+    participants = data.get("relatedParticipants")
+    distributor = next(
+        (p.get("party") for p in participants
+         if isinstance(p, dict) and str(p.get("role", "")).upper() == "LNSP"),
+        None,
+    ) if isinstance(participants, list) else None
+    loss = _object(data.get("distributionLossFactor"))
 
     return ServicePoint(
         service_point_id=str(data.get("servicePointId", "")),
@@ -276,6 +286,10 @@ def parse_service_point(payload: Any) -> ServicePoint:
         jurisdiction_code=data.get("jurisdictionCode"),
         is_generator=bool(data.get("isGenerator", False)),
         meters=tuple(meters),
+        distributor=distributor,
+        loss_factor=_float(loss.get("lossValue")),
+        loss_factor_code=loss.get("code"),
+        loss_factor_description=loss.get("description"),
     )
 
 
