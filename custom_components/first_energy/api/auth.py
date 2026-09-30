@@ -17,8 +17,12 @@ Re-logging in whenever the BFF token expires would send the password to the
 server twenty-four times more often than necessary, so the two are tracked
 separately.
 
-No refresh endpoint was ever observed. When the access token does expire, the
-only route back is a fresh login.
+The login also returns a **refresh token**, lasting ten days. When the access
+token expires, `POST {api}/v1/auth/refreshtoken` (BFF bearer, the refresh token
+in the body) exchanges it for a new access token and a new refresh token, the
+same shape the login returns. Each refresh restarts the ten days, so after the
+first login the password is only sent again when a refresh fails. The refresh
+token is held in memory only: a restart logs in once with the password.
 """
 
 from __future__ import annotations
@@ -45,6 +49,9 @@ REFRESH_MARGIN = timedelta(minutes=2)
 # Used only when a token's `exp` claim cannot be read.
 FALLBACK_BFF_LIFETIME = timedelta(minutes=55)
 FALLBACK_ACCESS_LIFETIME = timedelta(hours=23)
+# A refresh token whose expiry can't be read is tried anyway for this long.
+# Guessing wrong costs one refused refresh and a password login.
+FALLBACK_REFRESH_LIFETIME = timedelta(hours=23)
 
 
 def decode_jwt_expiry(token: str) -> datetime | None:
@@ -102,13 +109,22 @@ class Authenticator:
         self._ua = user_agent
         self._bff: Token | None = None
         self._access: Token | None = None
+        self._refresh: Token | None = None
         self._lock = asyncio.Lock()
 
     def invalidate(self, *, access_token_too: bool = False) -> None:
-        """Drop cached tokens so the next request re-acquires them."""
+        """Drop cached tokens so the next request re-acquires them.
+
+        Dropping the access token drops the refresh token with it. The
+        caller does that after the application itself refused a request,
+        and its retry is the last chance before asking the user for the
+        password again, so it should be made with a password login rather
+        than a token derived from the one just refused.
+        """
         self._bff = None
         if access_token_too:
             self._access = None
+            self._refresh = None
 
     async def async_headers(self) -> dict[str, str]:
         """Both credential headers, refreshing whichever has gone stale."""
@@ -158,6 +174,12 @@ class Authenticator:
     async def _async_access_token(self, bff: str) -> str:
         if self._access and self._access.is_fresh:
             return self._access.value
+        if (
+            self._refresh
+            and self._refresh.is_fresh
+            and (token := await self._async_refresh(bff, self._refresh.value))
+        ):
+            return token
 
         headers = {
             "accept": "*/*",
@@ -187,13 +209,64 @@ class Authenticator:
             raise ApiError(response.status, body, headers_out)
 
         try:
-            token = json.loads(body)["access_token"]
+            payload = json.loads(body)
+            token = payload["access_token"]
         except (ValueError, KeyError, TypeError) as err:
             raise ApiError(200, f"login response had no access_token: {body[:200]}") from err
         if not isinstance(token, str) or not token:
             raise ApiError(200, "login response's access_token was not a string")
 
-        expiry = decode_jwt_expiry(token) or datetime.now(UTC) + FALLBACK_ACCESS_LIFETIME
-        self._access = Token(token, expiry)
-        _LOGGER.debug("Acquired access token, expires %s", expiry.isoformat())
+        self._store(token, payload.get("refresh_token"))
         return token
+
+    async def _async_refresh(self, bff: str, refresh_token: str) -> str | None:
+        """A new access token from the refresh token, or None.
+
+        None means fall back to the password. Any refusal counts, not only
+        a 401: the endpoint is undocumented, and the password login is
+        always there to recover through. Network errors are not caught,
+        because the login would fail the same way.
+        """
+        headers = {
+            "accept": "*/*",
+            "content-type": "application/json",
+            "origin": self._portal,
+            "referer": f"{self._portal}/",
+            "user-agent": self._ua,
+            "authorization": f"Bearer {bff}",
+        }
+        async with self._session.post(
+            f"{self._api}/v1/auth/refreshtoken",
+            json={"refresh_token": refresh_token},
+            headers=headers,
+        ) as response:
+            body = await response.text()
+            status = response.status
+
+        self._refresh = None
+        token = None
+        if status == 200:
+            try:
+                payload = json.loads(body)
+                token = payload.get("access_token")
+            except (ValueError, AttributeError):
+                payload = None
+        if not isinstance(token, str) or not token:
+            _LOGGER.debug("Token refresh refused (HTTP %s); logging in again", status)
+            return None
+
+        self._store(token, payload.get("refresh_token"))
+        return token
+
+    def _store(self, access_token: str, refresh_token: object) -> None:
+        """Cache the access token, and the refresh token if one came with it."""
+        expiry = decode_jwt_expiry(access_token) or datetime.now(UTC) + FALLBACK_ACCESS_LIFETIME
+        self._access = Token(access_token, expiry)
+        _LOGGER.debug("Acquired access token, expires %s", expiry.isoformat())
+
+        if isinstance(refresh_token, str) and refresh_token:
+            refresh_expiry = (decode_jwt_expiry(refresh_token)
+                              or datetime.now(UTC) + FALLBACK_REFRESH_LIFETIME)
+            self._refresh = Token(refresh_token, refresh_expiry)
+        else:
+            self._refresh = None
