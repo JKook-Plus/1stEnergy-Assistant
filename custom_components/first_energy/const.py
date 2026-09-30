@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from typing import Final
 
@@ -45,6 +46,23 @@ BACKFILL_FAILURES_BEFORE_ISSUE: Final = 5
 # existing user's recorded history.
 STAT_ENERGY: Final = "energy"
 STAT_COST: Final = "cost"
+# The supply charge's share of the cost, beside the per-band costs.
+SUPPLY_CHARGE_BAND: Final = "supply_charge"
+
+
+def band_slug(band: str) -> str:
+    """A time-of-use band as the API names it ("Off Peak"), made id-safe."""
+    return re.sub(r"[^a-z0-9]+", "_", band.lower()).strip("_")
+
+
+def band_statistic_id(nmi: str, kind: str, band: str) -> str:
+    """External statistic id for one time-of-use band of a meter.
+
+    `energy_off_peak_<nmi>` sits beside `energy_<nmi>` rather than
+    replacing it: the bands are a breakdown of the total, not a second
+    copy to add to it.
+    """
+    return statistic_id(nmi, f"{kind}_{band_slug(band)}")
 
 
 def statistic_id(nmi: str, kind: str) -> str:

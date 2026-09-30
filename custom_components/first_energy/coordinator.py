@@ -30,8 +30,8 @@ from .const import (
     ROLLING_WINDOW_DAYS,
     UPDATE_INTERVAL,
 )
-from .domain import Account, Invoice, ServicePoint, UsageDay
-from .services.statistics import bucket_hourly, combine_registers
+from .domain import Account, Invoice, Plan, ServicePoint, UsageDay, plan_on
+from .services.statistics import add_daily_charge, bucket_hourly, combine_registers
 from .statistics import async_import_buckets
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,6 +43,7 @@ class FirstEnergyData:
 
     account: Account
     service_point: ServicePoint
+    plans: tuple[Plan, ...] = ()
     balance: Decimal | None = None
     invoices: tuple[Invoice, ...] = ()
     last_read_date: date | None = None
@@ -76,6 +77,8 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
         self.client = client
         self.account = account
         self._service_point: ServicePoint | None = None
+        # Refreshed on every poll, and read by imports for the supply charge.
+        self._plans: tuple[Plan, ...] = ()
         self._backfill_task: asyncio.Task[None] | None = None
         self._backfill_failures = 0
         self._backfill_polls_to_skip = 0
@@ -113,6 +116,7 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
         service_point = self._service_point
         assert service_point is not None  # _async_setup guarantees this
 
+        self._plans = await self._call(self.client.async_get_plans(self.account.account_id))
         balance = await self._call(self.client.async_get_balance(self.account.account_id))
         invoices = await self._call(self.client.async_get_invoices(self.account.account_id))
 
@@ -137,6 +141,7 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
         return FirstEnergyData(
             account=self.account,
             service_point=service_point,
+            plans=self._plans,
             balance=balance,
             invoices=invoices,
             last_read_date=days[-1].read_date if days else None,
@@ -167,7 +172,8 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
         live, a meter can carry a controlled-load register beside the
         general one, and a smart meter also reports reactive energy. Only
         CURRENT import registers count, and they are summed into the
-        meter's single series.
+        meter's single series. The plan's daily supply charge is added to
+        the cost, which the reads leave out.
         """
         if not days:
             return 0
@@ -184,12 +190,20 @@ class FirstEnergyCoordinator(DataUpdateCoordinator[FirstEnergyData]):
         result = bucket_hourly(days, tz, registers=active or None)
         for warning in result.warnings:
             _LOGGER.info("Interval count anomaly: %s", warning)
+        buckets = add_daily_charge(
+            combine_registers(result.buckets), tz, self._supply_charge)
         return await async_import_buckets(
             self.hass,
             service_point.nmi,
-            combine_registers(result.buckets),
+            buckets,
             display_name=f"1st Energy {service_point.nmi}",
         )
+
+    def _supply_charge(self, day: date) -> float | None:
+        """The daily supply charge in force on `day`, if a plan covers it."""
+        plan = plan_on(self._plans, day)
+        charge = plan.daily_supply_charge(day) if plan else None
+        return float(charge) if charge is not None else None
 
     def _maybe_start_backfill(self, service_point: ServicePoint) -> None:
         """Start the history backfill unless it is done, running or backing off."""

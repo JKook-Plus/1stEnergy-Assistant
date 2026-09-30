@@ -12,6 +12,19 @@ them through Decimal would dress up precision that was already lost upstream.
 
 from .account import Account, Invoice
 from .meter import Meter, Register, ServicePoint
+from .tariff import Plan, Rate, TariffPeriod, TimeWindow, plan_on
 from .usage import UsageDay
 
-__all__ = ["Account", "Invoice", "Meter", "Register", "ServicePoint", "UsageDay"]
+__all__ = [
+    "Account",
+    "Invoice",
+    "Meter",
+    "Plan",
+    "Rate",
+    "Register",
+    "ServicePoint",
+    "TariffPeriod",
+    "TimeWindow",
+    "UsageDay",
+    "plan_on",
+]

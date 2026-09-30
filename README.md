@@ -119,6 +119,25 @@ off-peak hot water) is added in, and registers the meter no longer uses are
 left out. Statistics are named `first_energy:energy_<nmi>` and
 `first_energy:cost_<nmi>`.
 
+The cost is the usage charge for each hour plus the plan's **daily supply
+charge**, spread evenly over the day's hours, so a day's cost matches what
+it adds to the bill. It is **exclusive of GST** and before any pay-on-time
+discount, because that is how the API prices it. Days outside every plan
+the account reports get no supply charge.
+
+### Peak and off-peak
+
+Every read is labelled with its time-of-use band, so each band also gets
+statistics of its own: `first_energy:energy_peak_<nmi>`,
+`first_energy:cost_peak_<nmi>`, `first_energy:energy_off_peak_<nmi>` and
+so on, plus `first_energy:cost_supply_charge_<nmi>`. The band costs and the
+supply charge add up to the total cost.
+
+To see the split on the Energy dashboard, add one grid consumption entry
+per band, each with its band's energy and cost, **instead of** the total.
+Don't add both: the dashboard sums its grid entries, so the bands on top of
+the total would count everything twice.
+
 ### If it isn't in the dropdown
 
 The list only offers statistics that already exist, so an empty dropdown
@@ -136,6 +155,14 @@ Each account gets a device, **1st Energy \<account number\>**, with:
 | **Next invoice amount** | The unpaid invoice due soonest, in AUD |
 | **Next invoice due** | Its due date |
 | **Meter data up to** | The latest day with meter data, which shows the one-day lag at a glance |
+| **Current price** | The usage rate in force right now, in AUD/kWh, excluding GST |
+| **Current period** | Peak, off-peak, shoulder or solar sponge, whichever the plan says applies now |
+| **Plan ends** | The date your current plan ends, when the rates may change |
+
+The price and period follow the plan's time-of-use windows in the meter's
+local time, and change on the minute the window does. They are for
+automations, such as running an appliance off-peak; the Energy dashboard's
+cost comes from the statistics above, not from the current price.
 
 Consumption and cost are deliberately **not** sensors; see
 [How it works](#how-it-works).
@@ -189,6 +216,11 @@ which lives as plain JSON under `config/.storage/`. That is standard for
 integrations that must log in with a password, but it is worth knowing:
 anyone who can read that directory can read the password. The integration
 only reads from your account; it never changes anything.
+
+The password is sent to 1st Energy once each time Home Assistant starts.
+After that, the session is kept alive with the refresh token the login
+returns, which is held in memory only and never written to disk. The
+password is sent again only if 1st Energy refuses a refresh.
 
 If you capture HAR files while investigating the API yourself, they
 contain your password, live tokens, NMI and address in plain text. Keep

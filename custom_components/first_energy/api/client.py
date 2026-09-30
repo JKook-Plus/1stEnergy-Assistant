@@ -23,13 +23,14 @@ from typing import Any
 
 import aiohttp
 
-from ..domain import Account, Invoice, ServicePoint, UsageDay
+from ..domain import Account, Invoice, Plan, ServicePoint, UsageDay
 from .auth import Authenticator
 from .exceptions import ApiError, AuthenticationError, FirstEnergyError
 from .parsers import (
     parse_accounts,
     parse_balance,
     parse_invoices,
+    parse_plans,
     parse_service_point,
     parse_usage,
 )
@@ -168,6 +169,11 @@ class FirstEnergyClient:
     async def async_get_balance(self, account_id: str) -> Decimal:
         payload = await self._async_get(f"/v1/accounts/{account_id}/balance")
         return parse_balance(payload)
+
+    async def async_get_plans(self, account_id: str) -> tuple[Plan, ...]:
+        """The account's plans and tariffs, from the account detail."""
+        payload = await self._async_get(f"/v1/accounts/{account_id}")
+        return parse_plans(payload)
 
     async def async_get_invoices(self, account_id: str) -> tuple[Invoice, ...]:
         payload = await self._async_get(f"/v1/accounts/{account_id}/invoices")

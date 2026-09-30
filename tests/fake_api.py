@@ -30,10 +30,14 @@ UNAUTHORIZED = json.dumps(
 )
 
 
-def jwt(expires_in: timedelta = timedelta(hours=1)) -> str:
-    """A structurally valid unsigned JWT carrying a real `exp` claim."""
+def jwt(expires_in: timedelta = timedelta(hours=1), **claims: Any) -> str:
+    """A structurally valid unsigned JWT carrying a real `exp` claim.
+
+    Extra claims make otherwise identical tokens distinguishable.
+    """
     exp = int((datetime.now(UTC) + expires_in).timestamp())
-    payload = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).decode().rstrip("=")
+    body = json.dumps({"exp": exp, **claims}).encode()
+    payload = base64.urlsafe_b64encode(body).decode().rstrip("=")
     return f"header.{payload}.signature"
 
 
@@ -54,7 +58,9 @@ class RecordedRequest:
 class FakeApi:
     """Queue responses per endpoint, then inspect what the client sent."""
 
-    ENDPOINTS = ("bff", "login", "accounts", "servicepoint", "usage", "balance", "invoices")
+    ENDPOINTS = (
+        "bff", "login", "refresh", "accounts", "servicepoint", "usage", "balance", "invoices",
+    )
 
     def __init__(self) -> None:
         self.requests: list[RecordedRequest] = []
@@ -97,6 +103,7 @@ class FakeApi:
         paths = {
             "bff": "/api/GetBffToken",
             "login": "/v1/auth/login",
+            "refresh": "/v1/auth/refreshtoken",
             "accounts": "/v1/energy/accounts",
             "usage": "/usage",
             "balance": "/balance",
@@ -137,6 +144,7 @@ class FakeApi:
 
         app.router.add_post("/api/GetBffToken", route("bff"))
         app.router.add_post("/v1/auth/login", route("login"))
+        app.router.add_post("/v1/auth/refreshtoken", route("refresh"))
         app.router.add_get("/v1/energy/accounts", route("accounts"))
         app.router.add_get("/v1/electricity/servicepoints/{spid}", route("servicepoint"))
         app.router.add_get("/v1/electricity/servicepoints/{spid}/usage", route("usage"))
