@@ -1,0 +1,177 @@
+{
+  "data": {
+    "accountId": "638594",
+    "accountNumber": "516645",
+    "displayName": "<redacted:displayname>",
+    "openStatus": "OPEN",
+    "creationDate": "2026-06-26",
+    "plans": [
+      {
+        "planOverview": {
+          "displayName": "Residential Time of Use",
+          "startDate": "2026-06-26",
+          "endDate": "2027-06-25"
+        },
+        "planDetail": {
+          "fuelType": "ELECTRICITY",
+          "isContingentPlan": false,
+          "electricityContract": {
+            "pricingModel": "TIME_OF_USE",
+            "timeZone": "LOCAL",
+            "isFixed": false,
+            "paymentOption": [
+              "PAPER_BILL"
+            ],
+            "tariffPeriod": [
+              {
+                "type": "RETAIL_SERVICE",
+                "displayName": "Off Peak Usage",
+                "startDate": "06-26",
+                "endDate": "06-25",
+                "timeZone": "LOCAL",
+                "rateBlockUType": "timeOfUseRates",
+                "timeOfUseRates": [
+                  {
+                    "displayName": "Off Peak Usage",
+                    "type": "OFF_PEAK",
+                    "rates": [
+                      {
+                        "unitPrice": "0.2200000",
+                        "measureUnit": "KWH",
+                        "volume": 0.0
+                      }
+                    ],
+                    "timeOfUse": [
+                      {
+                        "startTime": "00:00:00",
+                        "endTime": "06:59:59",
+                        "days": [
+                          "MON",
+                          "TUE",
+                          "WED",
+                          "THU",
+                          "FRI",
+                          "SAT",
+                          "SUN",
+                          "PUBLIC_HOLIDAYS"
+                        ]
+                      },
+                      {
+                        "startTime": "22:00:00",
+                        "endTime": "23:59:59",
+                        "days": [
+                          "MON",
+                          "TUE",
+                          "WED",
+                          "THU",
+                          "FRI",
+                          "SAT",
+                          "SUN",
+                          "PUBLIC_HOLIDAYS"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "RETAIL_SERVICE",
+                "displayName": "Shoulder Usage",
+                "startDate": "06-26",
+                "endDate": "06-25",
+                "timeZone": "LOCAL",
+                "rateBlockUType": "timeOfUseRates",
+                "timeOfUseRates": [
+                  {
+                    "displayName": "Shoulder Usage",
+                    "type": "SHOULDER",
+                    "rates": [
+                      {
+                        "unitPrice": "0.3000000",
+                        "measureUnit": "KWH",
+                        "volume": 0.0
+                      }
+                    ],
+                    "timeOfUse": [
+                      {
+                        "startTime": "07:00:00",
+                        "endTime": "15:59:59",
+                        "days": [
+                          "MON",
+                          "TUE",
+                          "WED",
+                          "THU",
+                          "FRI",
+                          "SAT",
+                          "SUN",
+                          "PUBLIC_HOLIDAYS"
+                        ]
+                      },
+                      {
+                        "startTime": "20:00:00",
+                        "endTime": "21:59:59",
+                        "days": [
+                          "MON",
+                          "TUE",
+                          "WED",
+                          "THU",
+                          "FRI",
+                          "SAT",
+                          "SUN",
+                          "PUBLIC_HOLIDAYS"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "RETAIL_SERVICE",
+                "displayName": "Peak Usage",
+                "startDate": "06-26",
+                "endDate": "06-25",
+                "timeZone": "LOCAL",
+                "rateBlockUType": "timeOfUseRates",
+                "timeOfUseRates": [
+                  {
+                    "displayName": "Peak Usage",
+                    "type": "PEAK",
+                    "rates": [
+                      {
+                        "unitPrice": "0.5500000",
+                        "measureUnit": "KWH",
+                        "volume": 0.0
+                      }
+                    ],
+                    "timeOfUse": [
+                      {
+                        "startTime": "16:00:00",
+                        "endTime": "19:59:59",
+                        "days": [
+                          "MON",
+                          "TUE",
+                          "WED",
+                          "THU",
+                          "FRI",
+                          "SAT",
+                          "SUN",
+                          "PUBLIC_HOLIDAYS"
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "dailySupplyCharge": "1.10000"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "servicePoints": [
+      {
+        "servicePointId": "663701"
+      }
+    ]
+  }
+}

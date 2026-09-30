@@ -22,9 +22,9 @@ the slots stay pinned to the right instants.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable
-from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta, tzinfo
+from collections.abc import Callable, Collection, Iterable, Sequence
+from dataclasses import dataclass, field, replace
+from datetime import UTC, date, datetime, timedelta, tzinfo
 
 from ..domain import UsageDay
 
@@ -40,6 +40,8 @@ class HourlyBucket:
     # same as it costing nothing.
     cost_aud: float | None = 0.0
     energy_by_tou: dict[str, float] = field(default_factory=dict)
+    # The share of a fixed daily charge included in `cost_aud`.
+    supply_aud: float = 0.0
 
     @property
     def dominant_tou(self) -> str | None:
@@ -160,3 +162,41 @@ def combine_registers(buckets: Iterable[HourlyBucket]) -> tuple[HourlyBucket, ..
             energy_by_tou={k: round(v, 6) for k, v in sorted(tou.items())},
         ))
     return tuple(combined)
+
+
+def add_daily_charge(
+    buckets: Sequence[HourlyBucket],
+    local_tz: tzinfo,
+    charge_for: Callable[[date], float | None],
+) -> tuple[HourlyBucket, ...]:
+    """Spread each local day's fixed charge evenly over its hours.
+
+    The reads price only the energy; the daily supply charge is on the
+    bill but in none of them. Each hour of a day carries an equal share,
+    so the day adds up to the charge whether it has 23, 24 or 25 hours.
+
+    Hours without a cost are left alone: the reads didn't price that
+    hour, and adding the charge would make it look priced. Days are
+    assigned by the local date an hour starts on.
+    """
+    by_day: dict[date, list[int]] = {}
+    for i, bucket in enumerate(buckets):
+        if bucket.cost_aud is not None:
+            by_day.setdefault(bucket.start.astimezone(local_tz).date(), []).append(i)
+
+    out = list(buckets)
+    for day, hours in by_day.items():
+        charge = charge_for(day)
+        if not charge:
+            continue
+        share = charge / len(hours)
+        for i in hours:
+            bucket = out[i]
+            assert bucket.cost_aud is not None
+            # Unrounded, so the day's shares add back up to the charge.
+            out[i] = replace(
+                bucket,
+                cost_aud=bucket.cost_aud + share,
+                supply_aud=bucket.supply_aud + share,
+            )
+    return tuple(out)

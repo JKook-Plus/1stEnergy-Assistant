@@ -5,15 +5,18 @@ long-term statistics with historical timestamps — publishing it as a sensor
 state would file yesterday's kilowatt-hours under today. See `statistics.py`.
 
 What remains is account-level information that really is current: the balance,
-the next invoice, and how far the meter data has actually reached.
+the next invoice, how far the meter data has actually reached, and the tariff
+in force right now.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
+from zoneinfo import ZoneInfo
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -21,14 +24,21 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.const import UnitOfEnergy
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from . import FirstEnergyConfigEntry
 from .const import CURRENCY, DOMAIN
 from .coordinator import FirstEnergyCoordinator, FirstEnergyData
+from .domain import Plan, Rate, plan_on
+
+# The CDR's time-of-use rate types, lower-cased.
+TOU_BANDS = ["peak", "off_peak", "shoulder", "solar_sponge"]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -70,6 +80,58 @@ SENSORS: tuple[FirstEnergySensorDescription, ...] = (
 )
 
 
+@dataclass(frozen=True, kw_only=True)
+class FirstEnergyTariffSensorDescription(SensorEntityDescription):
+    """A sensor read from the plan at the current local time."""
+
+    value: Callable[[Plan | None, Rate | None], Decimal | date | str | None]
+    attributes: Callable[[Plan | None, Rate | None], dict[str, Any]] = lambda plan, rate: {}
+
+
+def _current_plan(plans: tuple[Plan, ...], today: date) -> Plan | None:
+    """The plan in force today, or failing that the most recent one."""
+    if plan := plan_on(plans, today):
+        return plan
+    dated = [p for p in plans if p.start_date is not None and p.start_date <= today]
+    return max(dated, key=lambda p: p.start_date or date.min) if dated else None
+
+
+TARIFF_SENSORS: tuple[FirstEnergyTariffSensorDescription, ...] = (
+    FirstEnergyTariffSensorDescription(
+        key="current_price",
+        translation_key="current_price",
+        # Not MONETARY: that device class takes a bare currency, and a
+        # price per kWh is what the Energy dashboard's "use an entity with
+        # the current price" option expects.
+        native_unit_of_measurement=f"{CURRENCY}/{UnitOfEnergy.KILO_WATT_HOUR}",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=4,
+        value=lambda plan, rate: rate.unit_price if rate else None,
+        attributes=lambda plan, rate: {
+            "rate": rate.name if rate else None,
+            "includes_gst": False,
+        },
+    ),
+    FirstEnergyTariffSensorDescription(
+        key="current_period",
+        translation_key="current_period",
+        device_class=SensorDeviceClass.ENUM,
+        options=TOU_BANDS,
+        value=lambda plan, rate: rate.band if rate and rate.band in TOU_BANDS else None,
+    ),
+    FirstEnergyTariffSensorDescription(
+        key="plan_end",
+        translation_key="plan_end",
+        device_class=SensorDeviceClass.DATE,
+        value=lambda plan, rate: plan.end_date if plan else None,
+        attributes=lambda plan, rate: {
+            "plan": plan.name if plan else None,
+            "start_date": plan.start_date.isoformat() if plan and plan.start_date else None,
+        },
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: FirstEnergyConfigEntry,
@@ -78,6 +140,20 @@ async def async_setup_entry(
     coordinator = entry.runtime_data
     async_add_entities(
         FirstEnergySensor(coordinator, description) for description in SENSORS
+    )
+    async_add_entities(
+        FirstEnergyTariffSensor(coordinator, description) for description in TARIFF_SENSORS
+    )
+
+
+def _device_info(coordinator: FirstEnergyCoordinator) -> DeviceInfo:
+    account = coordinator.account
+    return DeviceInfo(
+        identifiers={(DOMAIN, account.account_id)},
+        name=f"1st Energy {account.account_number}",
+        manufacturer="1st Energy",
+        model=account.plan_name or "Electricity",
+        configuration_url="https://myaccount.1stenergy.com.au",
     )
 
 
@@ -92,16 +168,83 @@ class FirstEnergySensor(CoordinatorEntity[FirstEnergyCoordinator], SensorEntity)
     ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
-        account = coordinator.account
-        self._attr_unique_id = f"{account.account_id}_{description.key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, account.account_id)},
-            name=f"1st Energy {account.account_number}",
-            manufacturer="1st Energy",
-            model=account.plan_name or "Electricity",
-            configuration_url="https://myaccount.1stenergy.com.au",
-        )
+        self._attr_unique_id = f"{coordinator.account.account_id}_{description.key}"
+        self._attr_device_info = _device_info(coordinator)
 
     @property
     def native_value(self) -> Decimal | date | str | None:
         return self.entity_description.value(self.coordinator.data)
+
+
+class FirstEnergyTariffSensor(CoordinatorEntity[FirstEnergyCoordinator], SensorEntity):
+    """The tariff at this moment, updated as the clock crosses into a new rate.
+
+    Rather than ticking every minute, each update schedules the next one
+    for when the rate next changes, or local midnight, whichever is
+    sooner; midnight is when a plan starts or ends. The plan's times are
+    the meter's local time, which isn't necessarily Home Assistant's.
+    """
+
+    entity_description: FirstEnergyTariffSensorDescription
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: FirstEnergyCoordinator,
+        description: FirstEnergyTariffSensorDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._attr_unique_id = f"{coordinator.account.account_id}_{description.key}"
+        self._attr_device_info = _device_info(coordinator)
+        self._unsub_change: CALLBACK_TYPE | None = None
+
+    def _now(self) -> datetime:
+        tz = ZoneInfo(self.coordinator.data.service_point.timezone_name)
+        return dt_util.now(tz)
+
+    def _current(self) -> tuple[Plan | None, Rate | None]:
+        now = self._now()
+        plan = _current_plan(self.coordinator.data.plans, now.date())
+        return plan, plan.rate_at(now) if plan else None
+
+    @property
+    def native_value(self) -> Decimal | date | str | None:
+        return self.entity_description.value(*self._current())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return self.entity_description.attributes(*self._current())
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self._cancel_change)
+        self._schedule_change()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._schedule_change()
+        super()._handle_coordinator_update()
+
+    @callback
+    def _cancel_change(self) -> None:
+        if self._unsub_change is not None:
+            self._unsub_change()
+            self._unsub_change = None
+
+    @callback
+    def _schedule_change(self) -> None:
+        self._cancel_change()
+        now = self._now()
+        midnight = datetime.combine(
+            now.date() + timedelta(days=1), datetime.min.time(), tzinfo=now.tzinfo)
+        plan = plan_on(self.coordinator.data.plans, now.date())
+        change = plan.next_change(now) if plan else None
+        self._unsub_change = async_track_point_in_time(
+            self.hass, self._changed, min(change, midnight) if change else midnight)
+
+    @callback
+    def _changed(self, _now: datetime) -> None:
+        self._unsub_change = None
+        self._schedule_change()
+        self.async_write_ha_state()

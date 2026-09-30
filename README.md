@@ -119,6 +119,12 @@ off-peak hot water) is added in, and registers the meter no longer uses are
 left out. Statistics are named `first_energy:energy_<nmi>` and
 `first_energy:cost_<nmi>`.
 
+The cost is the usage charge for each hour plus the plan's **daily supply
+charge**, spread evenly over the day's hours, so a day's cost matches what
+it adds to the bill. It is **exclusive of GST** and before any pay-on-time
+discount, because that is how the API prices it. Days outside every plan
+the account reports get no supply charge.
+
 ### If it isn't in the dropdown
 
 The list only offers statistics that already exist, so an empty dropdown
@@ -136,6 +142,14 @@ Each account gets a device, **1st Energy \<account number\>**, with:
 | **Next invoice amount** | The unpaid invoice due soonest, in AUD |
 | **Next invoice due** | Its due date |
 | **Meter data up to** | The latest day with meter data, which shows the one-day lag at a glance |
+| **Current price** | The usage rate in force right now, in AUD/kWh, excluding GST |
+| **Current period** | Peak, off-peak, shoulder or solar sponge, whichever the plan says applies now |
+| **Plan ends** | The date your current plan ends, when the rates may change |
+
+The price and period follow the plan's time-of-use windows in the meter's
+local time, and change on the minute the window does. They are for
+automations, such as running an appliance off-peak; the Energy dashboard's
+cost comes from the statistics above, not from the current price.
 
 Consumption and cost are deliberately **not** sensors; see
 [How it works](#how-it-works).

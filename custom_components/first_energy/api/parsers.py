@@ -11,11 +11,22 @@ normalise on the way in so nothing downstream has to care.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from ..domain import Account, Invoice, Meter, Register, ServicePoint, UsageDay
+from ..domain import (
+    Account,
+    Invoice,
+    Meter,
+    Plan,
+    Rate,
+    Register,
+    ServicePoint,
+    TariffPeriod,
+    TimeWindow,
+    UsageDay,
+)
 from .exceptions import FirstEnergyError
 
 
@@ -153,6 +164,77 @@ def parse_invoices(payload: Any) -> tuple[Invoice, ...]:
             pay_on_time_discount=_decimal(discount),
         ))
     out.sort(key=lambda i: (i.issue_date or date.min), reverse=True)
+    return tuple(out)
+
+
+# ------------------------------------------------------------------ plans
+
+def _time(value: Any) -> time | None:
+    try:
+        return time.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def _rate(raw: dict[str, Any]) -> Rate | None:
+    """A time-of-use rate, or None when it has no usable price.
+
+    Only the first price step is kept. A stepped rate (a cheaper price
+    after some volume) would need the running total for the billing
+    period, which nothing here has.
+    """
+    steps = _records(raw.get("rates") or [], what="plan: rates")
+    price = _decimal(steps[0].get("unitPrice")) if steps else None
+    if price is None:
+        return None
+    windows = []
+    for window in _records(raw.get("timeOfUse") or [], what="plan: timeOfUse"):
+        start, end = _time(window.get("startTime")), _time(window.get("endTime"))
+        if start is None or end is None:
+            continue
+        days = window.get("days")
+        windows.append(TimeWindow(
+            start=start, end=end,
+            days=frozenset(str(d).upper() for d in days) if isinstance(days, list)
+            else frozenset(),
+        ))
+    return Rate(
+        name=str(raw.get("displayName") or raw.get("type") or ""),
+        band=str(raw.get("type") or "").lower(),
+        unit_price=price,
+        windows=tuple(windows),
+    )
+
+
+def parse_plans(payload: Any) -> tuple[Plan, ...]:
+    """`GET /v1/accounts/{id}`: the account's plans and their tariffs.
+
+    Periods whose rates aren't time-of-use still count, for the supply
+    charge they carry; a rate without a price is dropped.
+    """
+    data = _data(payload, what="account")
+    out = []
+    for raw in _records(data.get("plans") or [], what="plans"):
+        overview = _object(raw.get("planOverview"))
+        contract = _object(_object(raw.get("planDetail")).get("electricityContract"))
+        periods = []
+        for period in _records(contract.get("tariffPeriod") or [],
+                               what="plan: tariffPeriod"):
+            rates = (_rate(r) for r in _records(period.get("timeOfUseRates") or [],
+                                                what="plan: timeOfUseRates"))
+            periods.append(TariffPeriod(
+                start=str(period.get("startDate") or "01-01"),
+                end=str(period.get("endDate") or "12-31"),
+                daily_supply_charge=_decimal(period.get("dailySupplyCharge")),
+                rates=tuple(r for r in rates if r is not None),
+            ))
+        out.append(Plan(
+            name=str(overview.get("displayName") or raw.get("nickname") or ""),
+            start_date=_date(overview.get("startDate")),
+            end_date=_date(overview.get("endDate")),
+            pricing_model=contract.get("pricingModel"),
+            periods=tuple(periods),
+        ))
     return tuple(out)
 
 
