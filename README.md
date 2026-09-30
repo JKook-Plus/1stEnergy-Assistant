@@ -125,6 +125,19 @@ it adds to the bill. It is **exclusive of GST** and before any pay-on-time
 discount, because that is how the API prices it. Days outside every plan
 the account reports get no supply charge.
 
+### Peak and off-peak
+
+Every read is labelled with its time-of-use band, so each band also gets
+statistics of its own: `first_energy:energy_peak_<nmi>`,
+`first_energy:cost_peak_<nmi>`, `first_energy:energy_off_peak_<nmi>` and
+so on, plus `first_energy:cost_supply_charge_<nmi>`. The band costs and the
+supply charge add up to the total cost.
+
+To see the split on the Energy dashboard, add one grid consumption entry
+per band, each with its band's energy and cost, **instead of** the total.
+Don't add both: the dashboard sums its grid entries, so the bands on top of
+the total would count everything twice.
+
 ### If it isn't in the dropdown
 
 The list only offers statistics that already exist, so an empty dropdown

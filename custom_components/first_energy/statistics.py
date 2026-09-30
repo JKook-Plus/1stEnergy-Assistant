@@ -31,7 +31,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.recorder import get_instance
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, STAT_COST, STAT_ENERGY, statistic_id
+from .const import (
+    DOMAIN,
+    STAT_COST,
+    STAT_ENERGY,
+    SUPPLY_CHARGE_BAND,
+    band_statistic_id,
+    statistic_id,
+)
 from .services.statistics import HourlyBucket
 
 _LOGGER = logging.getLogger(__name__)
@@ -152,6 +159,42 @@ def _metadata(
     )
 
 
+async def _async_write_bands(
+    hass: HomeAssistant,
+    nmi: str,
+    buckets: Sequence[HourlyBucket],
+    display_name: str,
+) -> None:
+    """Write the per-band series.
+
+    A band gets a row for every hour of the import, zero where it didn't
+    apply, so its series has no holes for the dashboard to join across.
+    """
+    bands = sorted({band for b in buckets for band in b.energy_by_tou})
+    priced = [b for b in buckets if b.cost_aud is not None]
+    for band in bands:
+        await _async_write_series(
+            hass,
+            _metadata(band_statistic_id(nmi, STAT_ENERGY, band),
+                      f"{display_name} {band} energy",
+                      UnitOfEnergy.KILO_WATT_HOUR, "energy"),
+            [(b.start, b.energy_by_tou.get(band, 0.0)) for b in buckets],
+        )
+        await _async_write_series(
+            hass,
+            _metadata(band_statistic_id(nmi, STAT_COST, band),
+                      f"{display_name} {band} cost", None, None),
+            [(b.start, b.cost_by_tou.get(band, 0.0)) for b in priced],
+        )
+    if any(b.supply_aud for b in priced):
+        await _async_write_series(
+            hass,
+            _metadata(band_statistic_id(nmi, STAT_COST, SUPPLY_CHARGE_BAND),
+                      f"{display_name} supply charge", None, None),
+            [(b.start, b.supply_aud) for b in priced],
+        )
+
+
 async def async_import_buckets(
     hass: HomeAssistant,
     nmi: str,
@@ -160,6 +203,10 @@ async def async_import_buckets(
     display_name: str,
 ) -> int:
     """Write energy and cost statistics for one meter. Returns hours written.
+
+    Beside the totals, each time-of-use band the reads name gets its own
+    energy and cost series, and the supply charge a cost series of its
+    own, so the band costs and the supply charge add up to the total.
 
     Re-importing an hour already stored is safe and intentional — the recorder
     replaces rows matching a statistic id and start time. That is what lets the
@@ -188,6 +235,7 @@ async def async_import_buckets(
         _metadata(statistic_id(nmi, STAT_COST), f"{display_name} cost", None, None),
         [(b.start, b.cost_aud) for b in buckets if b.cost_aud is not None],
     )
+    await _async_write_bands(hass, nmi, buckets, display_name)
     await get_instance(hass).async_block_till_done()
 
     _LOGGER.debug(

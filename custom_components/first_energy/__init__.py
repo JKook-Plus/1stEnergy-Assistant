@@ -111,6 +111,15 @@ async def async_migrate_entry(hass: HomeAssistant, entry: FirstEnergyConfigEntry
         hass.config_entries.async_update_entry(entry, data=data, minor_version=5)
         _LOGGER.info("Re-importing 1st Energy history to add the daily supply charge")
 
+    if entry.minor_version < 6:
+        # Version 1.6 adds a series for each time-of-use band. Re-import so
+        # they cover past days as well as new ones.
+        data = {**entry.data}
+        data.pop(CONF_BACKFILL_DONE, None)
+        data.pop(CONF_BACKFILL_CURSOR, None)
+        hass.config_entries.async_update_entry(entry, data=data, minor_version=6)
+        _LOGGER.info("Re-importing 1st Energy history to split it by time of use")
+
     return True
 
 

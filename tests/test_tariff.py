@@ -298,7 +298,7 @@ class FakeClient:
 async def loaded(recorder_mock, enable_custom_integrations, hass: HomeAssistant, freezer):
     freezer.move_to(at("15:59:00"))
     entry = MockConfigEntry(
-        domain=DOMAIN, version=1, minor_version=5, unique_id="638594",
+        domain=DOMAIN, version=1, minor_version=6, unique_id="638594",
         data={"username": "user@example.com", "password": "hunter2",
               CONF_ACCOUNT_ID: "638594", CONF_BACKFILL_DONE: True},
     )

@@ -155,7 +155,7 @@ class TestUnits:
         metadata = await hass.async_add_executor_job(
             lambda: get_metadata(hass, statistic_ids={entity_id}))
         assert metadata[entity_id][1]["unit_of_measurement"] == "AUD"
-        assert entry.minor_version == 5
+        assert entry.minor_version == 6
 
 
 class TestParserRobustness:

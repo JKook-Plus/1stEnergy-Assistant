@@ -28,6 +28,10 @@ from datetime import UTC, date, datetime, timedelta, tzinfo
 
 from ..domain import UsageDay
 
+# What `intervalTOU` holds for a slot with no band: JSON null, which the
+# parser turns into "None".
+UNLABELLED = frozenset({"", "None"})
+
 
 @dataclass(frozen=True, slots=True)
 class HourlyBucket:
@@ -40,6 +44,9 @@ class HourlyBucket:
     # same as it costing nothing.
     cost_aud: float | None = 0.0
     energy_by_tou: dict[str, float] = field(default_factory=dict)
+    # The usage charge alone, split the same way. The supply share is not
+    # in any band.
+    cost_by_tou: dict[str, float] = field(default_factory=dict)
     # The share of a fixed daily charge included in `cost_aud`.
     supply_aud: float = 0.0
 
@@ -79,6 +86,7 @@ def bucket_hourly(
     energy: dict[tuple[datetime, str], float] = {}
     cost: dict[tuple[datetime, str], float] = {}
     tou_split: dict[tuple[datetime, str], dict[str, float]] = {}
+    tou_cost: dict[tuple[datetime, str], dict[str, float]] = {}
     warnings: list[str] = []
 
     for day in days:
@@ -108,9 +116,12 @@ def bucket_hourly(
             energy[key] = energy.get(key, 0.0) + kwh
             if i < len(day.costings):
                 cost[key] = cost.get(key, 0.0) + day.costings[i]
-            if i < len(day.tou):
+            if i < len(day.tou) and (label := day.tou[i]) not in UNLABELLED:
                 band = tou_split.setdefault(key, {})
-                band[day.tou[i]] = band.get(day.tou[i], 0.0) + kwh
+                band[label] = band.get(label, 0.0) + kwh
+                if i < len(day.costings):
+                    priced = tou_cost.setdefault(key, {})
+                    priced[label] = priced.get(label, 0.0) + day.costings[i]
 
     buckets = tuple(
         HourlyBucket(
@@ -120,6 +131,8 @@ def bucket_hourly(
             cost_aud=round(cost[(hour, reg)], 6) if (hour, reg) in cost else None,
             energy_by_tou={k: round(v, 6) for k, v in
                            sorted(tou_split.get((hour, reg), {}).items())},
+            cost_by_tou={k: round(v, 6) for k, v in
+                         sorted(tou_cost.get((hour, reg), {}).items())},
         )
         for hour, reg in sorted(energy, key=lambda k: (k[0], k[1]))
     )
@@ -151,15 +164,19 @@ def combine_registers(buckets: Iterable[HourlyBucket]) -> tuple[HourlyBucket, ..
             combined.append(parts[0])
             continue
         tou: dict[str, float] = {}
+        tou_cost: dict[str, float] = {}
         for part in parts:
             for band, kwh in part.energy_by_tou.items():
                 tou[band] = tou.get(band, 0.0) + kwh
+            for band, aud in part.cost_by_tou.items():
+                tou_cost[band] = tou_cost.get(band, 0.0) + aud
         combined.append(HourlyBucket(
             start=hour,
             register_id="+".join(sorted(p.register_id for p in parts)),
             energy_kwh=round(sum(p.energy_kwh for p in parts), 6),
             cost_aud=_sum_known(p.cost_aud for p in parts),
             energy_by_tou={k: round(v, 6) for k, v in sorted(tou.items())},
+            cost_by_tou={k: round(v, 6) for k, v in sorted(tou_cost.items())},
         ))
     return tuple(combined)
 

@@ -32,7 +32,8 @@ class FirstEnergyConfigFlow(ConfigFlow, domain=DOMAIN):
     # 4: re-run the backfill, to fill days lost to short usage pages and drop
     # reactive-energy registers from consumption.
     # 5: re-run the backfill, to add the daily supply charge to cost.
-    MINOR_VERSION = 5
+    # 6: re-run the backfill, to write the per-band series for past days.
+    MINOR_VERSION = 6
 
     def __init__(self) -> None:
         self._username: str | None = None
