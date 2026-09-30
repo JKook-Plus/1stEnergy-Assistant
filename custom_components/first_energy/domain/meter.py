@@ -43,6 +43,23 @@ class Register:
     def is_active(self) -> bool:
         return self.status.upper() == "CURRENT"
 
+    @property
+    def measures_consumption(self) -> bool:
+        """True for a register of energy drawn from the grid.
+
+        Register IDs are NEM12 suffixes, whose first letter says what is
+        measured: `E` is energy imported (general or controlled load), `B`
+        exported, `K` and `Q` reactive energy. The API labels every one of
+        them kWh, so the unit can't tell them apart. `K1` and `Q1` on a live
+        meter carry no cost, and adding them overstated usage by about 8%
+        against the old retailer's figures, which match `E1` alone.
+
+        A basic accumulation meter's register is numbered (`1`), not lettered,
+        and is consumption too.
+        """
+        first = self.register_id[:1].upper()
+        return first == "E" or first.isdigit()
+
 
 @dataclass(frozen=True, slots=True)
 class Meter:
@@ -69,6 +86,11 @@ class ServicePoint:
     @property
     def active_registers(self) -> tuple[Register, ...]:
         return tuple(r for m in self.meters for r in m.registers if r.is_active)
+
+    @property
+    def consumption_registers(self) -> tuple[Register, ...]:
+        """The live registers whose reads add up to grid usage."""
+        return tuple(r for r in self.active_registers if r.measures_consumption)
 
     @property
     def timezone_name(self) -> str:

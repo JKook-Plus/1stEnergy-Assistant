@@ -14,7 +14,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from homeassistant.components.recorder.statistics import statistics_during_period
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import CoreState, HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
@@ -90,6 +91,18 @@ class TestBucketing:
         assert {b.register_id for b in buckets} == {"E1"}
         assert sum(b.energy_kwh for b in buckets) == pytest.approx(28.8)
 
+    @pytest.mark.parametrize(("register_id", "expected"), [
+        ("E1", True), ("E2", True), ("e1", True), ("1", True),
+        ("B1", False), ("K1", False), ("Q1", False), ("", False),
+    ])
+    def test_which_registers_measure_consumption(self, register_id, expected):
+        assert register(register_id, "CURRENT").measures_consumption is expected
+
+    def test_consumption_registers_are_live_imports_only(self):
+        sp = service_point(register("E1", "CURRENT"), register("K1", "CURRENT"),
+                           register("E0", "REMOVED"))
+        assert [r.register_id for r in sp.consumption_registers] == ["E1"]
+
     def test_a_single_register_passes_through_unchanged(self):
         buckets = bucket_hourly([make_day("E1", 0.1)], SYDNEY).buckets
         assert combine_registers(buckets) == buckets
@@ -131,6 +144,36 @@ class TestImport:
         assert rows[-1]["sum"] == pytest.approx(288 * 0.15)
         assert all(r["state"] == pytest.approx(12 * 0.15) for r in rows)
 
+    async def test_reactive_registers_are_not_consumption(
+        self, recorder_mock, enable_custom_integrations, hass: HomeAssistant, coordinator
+    ):
+        """A smart meter's K1 and Q1 are reported in "kWh" but aren't usage."""
+        sp = service_point(register("E1", "CURRENT"), register("K1", "CURRENT"),
+                           register("Q1", "CURRENT"))
+        await coordinator._async_import(
+            sp, [make_day("E1", 0.1), make_day("K1", 0.01), make_day("Q1", 0.02)])
+
+        rows = await stored_energy(hass)
+        assert len(rows) == 24
+        assert rows[-1]["sum"] == pytest.approx(28.8)
+
+    async def test_startup_import_waits_until_home_assistant_has_started(
+        self, recorder_mock, enable_custom_integrations, hass: HomeAssistant, coordinator
+    ):
+        """The recorder holds its queue during startup; waiting on it from setup hung."""
+        sp = service_point(register("E1", "CURRENT"))
+        hass.set_state(CoreState.starting)
+        coordinator._import_after_start(sp, [make_day("E1", 0.1)])
+        await hass.async_block_till_done()
+        assert await stored_energy(hass) == []
+
+        hass.set_state(CoreState.running)
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+        await hass.async_block_till_done()
+        rows = await stored_energy(hass)
+        assert len(rows) == 24
+        assert rows[-1]["sum"] == pytest.approx(28.8)
+
     async def test_removed_register_contributes_nothing(
         self, recorder_mock, enable_custom_integrations, hass: HomeAssistant, coordinator
     ):
@@ -155,13 +198,13 @@ class TestUpgrade:
         assert await async_migrate_entry(hass, entry)
         assert CONF_BACKFILL_DONE not in entry.data
         assert entry.data[CONF_ACCOUNT_ID] == "638594"
-        assert entry.minor_version == 3
+        assert entry.minor_version == 4
 
     async def test_migrated_entries_are_left_alone(
         self, recorder_mock, enable_custom_integrations, hass: HomeAssistant
     ):
         entry = MockConfigEntry(
-            domain=DOMAIN, version=1, minor_version=2, unique_id="638594",
+            domain=DOMAIN, version=1, minor_version=4, unique_id="638594",
             data={CONF_ACCOUNT_ID: "638594", CONF_BACKFILL_DONE: True},
         )
         entry.add_to_hass(hass)

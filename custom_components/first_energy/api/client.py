@@ -51,6 +51,11 @@ DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=60)
 # cheap to retry.
 WINDOW_DAYS = 30
 
+# Records per usage page. The API returns one record per register per day, so
+# a meter with several registers needs several records for each day: sizing the
+# page by days silently truncated the window. Pages are followed regardless.
+PAGE_SIZE = 100
+
 # Pause between chunks during a backfill. This endpoint is undocumented and a
 # burst of rapid logins during the original reverse-engineering may already have
 # tripped a temporary block, so backfill deliberately ambles.
@@ -189,18 +194,23 @@ class FirstEnergyClient:
         if oldest == newest:
             oldest = oldest - timedelta(days=1)
 
-        span = (newest - oldest).days + 1
-        query = [
-            "page=1",
-            f"page-size={span + 1}",
+        query = "&".join([
+            f"page-size={PAGE_SIZE}",
             f"interval-reads={'MIN_30' if with_intervals else 'NONE'}",
             f"oldest-date={oldest.isoformat()}",
             f"newest-date={newest.isoformat()}",
-        ]
-        payload = await self._async_get(
-            f"/v1/electricity/servicepoints/{service_point_id}/usage?" + "&".join(query)
-        )
-        days = parse_usage(payload)
+        ])
+        days: list[UsageDay] = []
+        page = 1
+        while True:
+            payload = await self._async_get(
+                f"/v1/electricity/servicepoints/{service_point_id}/usage?page={page}&{query}"
+            )
+            days.extend(parse_usage(payload))
+            if page >= _total_pages(payload):
+                break
+            page += 1
+        days.sort(key=lambda u: (u.read_date, u.register_id))
         return tuple(d for d in days if requested_oldest <= d.read_date <= newest)
 
     async def async_iter_usage_range(
@@ -238,6 +248,15 @@ class FirstEnergyClient:
             )
             yield window_start, window_end, days
             window_start = window_end + timedelta(days=1)
+
+
+def _total_pages(payload: Any) -> int:
+    """`meta.totalPages`, or 1 when the response doesn't say."""
+    meta = payload.get("meta") if isinstance(payload, dict) else None
+    try:
+        return int((meta or {}).get("totalPages") or 1)
+    except (TypeError, ValueError):
+        return 1
 
 
 async def _decode(body: str, path: str) -> Any:

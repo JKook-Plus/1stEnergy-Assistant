@@ -193,6 +193,26 @@ class TestUsageWindows:
         await client.async_get_usage("663701", date(2026, 8, 6), date(2026, 8, 13))
         assert api.for_endpoint("/usage")[0].query["interval-reads"] == "MIN_30"
 
+    async def test_every_page_is_fetched(self, api, client):
+        """Three registers a day overflowed a page sized by days, losing days."""
+        reads = load("usage_recent_7d")["data"]["reads"]
+        api.stub_auth()
+        api.queue("usage", payload={"data": {"reads": reads[3:]},
+                                    "meta": {"totalRecords": len(reads), "totalPages": 2}})
+        api.queue("usage", payload={"data": {"reads": reads[:3]},
+                                    "meta": {"totalRecords": len(reads), "totalPages": 2}})
+        days = await client.async_get_usage("663701", date(2026, 8, 6), date(2026, 8, 13))
+
+        assert [r.query["page"] for r in api.for_endpoint("/usage")] == ["1", "2"]
+        assert len(days) == len(reads)
+        assert [d.read_date for d in days] == sorted(d.read_date for d in days)
+
+    async def test_page_size_is_not_tied_to_the_number_of_days(self, api, client):
+        api.stub_auth()
+        api.queue("usage", payload=load("usage_recent_7d"))
+        await client.async_get_usage("663701", date(2026, 8, 6), date(2026, 8, 13))
+        assert int(api.for_endpoint("/usage")[0].query["page-size"]) >= 100
+
     async def test_reversed_dates_are_tolerated(self, api, client):
         api.stub_auth()
         api.queue("usage", payload=load("usage_recent_7d"))
